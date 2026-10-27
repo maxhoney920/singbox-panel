@@ -1,3 +1,8 @@
+## 2.3.0
+- sing-box update: if the new version does not accept the config because of outdated fields, the panel converts them to the new format (DNS servers address → type, dns rules with outbound → domain_resolver, tun inet4_* fields, sniff/domain_strategy on inbounds, block/dns outbounds → reject/hijack-dns actions), checks the result with the new version and shows the list of changes. The config is written only during installation, the previous one is kept; if the service does not come up, both the binary and the config are restored
+- sing-box messages are shown without color codes like "[31mFATAL[0m"
+- "Settings → Config → Compatibility": a "Convert outdated fields to the new format" button for the installed version (with a preview of the changes)
+
 ## 2.2.2
 - Update counters on menu items: "Settings" and "Updates" show how many updates are available (panel, sing-box, system packages; red if there is a panel or security update), "Routing" shows how many rules come from outdated preset lists. Details are in the tooltip. No other notifications
 

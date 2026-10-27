@@ -271,10 +271,13 @@ app = MiniApp()
 
 
 # ------------------------------------------------------------------- утилиты
+ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+
+
 def run(cmd, timeout=30, cwd=None):
     try:
         p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, cwd=cwd)
-        return p.returncode, (p.stdout + p.stderr).strip()
+        return p.returncode, ANSI_RE.sub("", (p.stdout + p.stderr)).strip()      # без цветовых кодов (sing-box красит FATAL)
     except FileNotFoundError:
         return 127, f"{cmd[0]}: команда не найдена"
     except OSError as e:                      # например, Exec format error у бинарника не той архитектуры
@@ -2428,6 +2431,258 @@ INBOUND_OLD = ("sniff", "sniff_override_destination", "sniff_timeout", "domain_s
                "udp_disable_domain_unmapping")
 
 
+# ------------------------------------------------- преобразование устаревших полей конфига под новую версию sing-box
+RCODES = {"success": "NOERROR", "format_error": "FORMERR", "server_failure": "SERVFAIL", "name_error": "NXDOMAIN",
+          "not_implemented": "NOTIMP", "refused": "REFUSED"}
+DNS_PORTS = {"udp": 53, "tcp": 53, "tls": 853, "quic": 853, "https": 443, "h3": 443}
+
+
+def _is_ip(h):
+    import ipaddress
+    try:
+        ipaddress.ip_address(h)
+        return True
+    except ValueError:
+        return False
+
+
+def _split_hostport(rest):
+    """host[:port] с поддержкой [IPv6]:port и голого IPv6."""
+    if rest.startswith("["):
+        host, _, tail = rest[1:].partition("]")
+        port = tail[1:] if tail.startswith(":") else ""
+    elif rest.count(":") == 1:
+        host, port = rest.split(":")
+    else:
+        host, port = rest, ""
+    return host, (int(port) if port.isdigit() else None)
+
+
+def _conv_dns_server(s, dns, empty_direct, notes, ver=(1, 12, 0)):
+    """Сервер DNS старого формата (address) → новый (type). None — сервер убирается (rcode://)."""
+    addr = str(s.get("address", "")).strip()
+    tag = s.get("tag")
+    new = {"tag": tag} if tag else {}
+    low = addr.lower()
+    if low == "local":
+        new["type"] = "local"
+    elif low == "fakeip":
+        new["type"] = "fakeip"
+        fk = dns.get("fakeip") or {}
+        for k in ("inet4_range", "inet6_range"):
+            if fk.get(k):
+                new[k] = fk[k]
+    elif low.startswith("rcode://"):
+        return None
+    elif low.startswith("dhcp://"):
+        new["type"] = "dhcp"
+        iface = addr[7:].strip("/")
+        if iface and iface != "auto":
+            new["interface"] = iface
+    else:
+        m = re.match(r"^(udp|tcp|tls|quic|https|h3)://(.+)$", addr, re.I)
+        typ, rest = (m.group(1).lower(), m.group(2)) if m else ("udp", addr)
+        path = ""
+        if typ in ("https", "h3") and "/" in rest:
+            rest, path = rest.split("/", 1)
+            path = "/" + path
+        host, port = _split_hostport(rest)
+        new.update(type=typ, server=host)
+        if port and port != DNS_PORTS[typ]:
+            new["server_port"] = port
+        if path and path != "/dns-query":
+            new["path"] = path
+    if s.get("address_resolver"):
+        new["domain_resolver"] = ({"server": s["address_resolver"], "strategy": s["address_strategy"]}
+                                  if s.get("address_strategy") else s["address_resolver"])
+    det = s.get("detour")
+    if det and det not in empty_direct:
+        new["detour"] = det
+    elif det:
+        notes.append(f"DNS-сервер «{tag}»: убран detour «{det}» — пустой direct в новых версиях запрещён, напрямую идёт и так")
+    if s.get("strategy") and ver >= (1, 14, 0):
+        # в 1.14 и strategy в DNS-правилах устарела (и останавливает запуск) — просто убираем
+        notes.append(f"DNS-сервер «{tag}»: strategy {s['strategy']} убрана — в новом формате её нет (общая настройка — dns.strategy)")
+    elif s.get("strategy"):                   # у сервера стратегии больше нет — переносим в правила, ведущие на него
+        n = 0
+        for r in dns.get("rules") or []:
+            if isinstance(r, dict) and r.get("server") == tag and r.get("action", "route") == "route" and "strategy" not in r:
+                r["strategy"] = s["strategy"]
+                n += 1
+        notes.append(f"DNS-сервер «{tag}»: strategy {s['strategy']} перенесена в правила, ведущие на него ({n})"
+                     + (" — для dns.final задайте при необходимости dns.strategy" if dns.get("final") == tag else ""))
+    for k, v in s.items():                          # прочие поля (client_subnet и т. п.) — как были
+        if k not in ("address", "address_resolver", "address_strategy", "strategy", "detour", "tag") and k not in new:
+            new[k] = v
+    return new
+
+
+def migrate_config(cfg, ver):
+    """Переводит устаревшие поля конфига в формат, который понимает sing-box версии ver (кортеж).
+    Возвращает (новый конфиг, список изменений). Исходный cfg не меняется."""
+    cfg = json.loads(json.dumps(cfg))
+    notes = []
+    if not ver:
+        return cfg, notes
+    outs = [o for o in cfg.get("outbounds") or [] if isinstance(o, dict)]
+    empty_direct = {o.get("tag") for o in outs if o.get("type") == "direct" and not (set(o) - {"type", "tag"})}
+    route = cfg.get("route") if isinstance(cfg.get("route"), dict) else {}
+    dns = cfg.get("dns") if isinstance(cfg.get("dns"), dict) else None
+
+    # 1) DNS-серверы старого формата → новый (с 1.12; старый удалён в 1.14)
+    if dns and ver >= (1, 12, 0):
+        servers = [x for x in dns.get("servers") or [] if isinstance(x, dict)]
+        if any("address" in x and "type" not in x for x in servers):
+            rcode_tags, new_servers = {}, []
+            for x in servers:
+                if "address" in x and "type" not in x:
+                    c = _conv_dns_server(x, dns, empty_direct, notes, ver)
+                    if c is None:
+                        rcode_tags[x.get("tag")] = RCODES.get(str(x["address"])[8:].lower(), "REFUSED")
+                    else:
+                        new_servers.append(c)
+                else:
+                    new_servers.append(x)
+            dns["servers"] = new_servers
+            if any(x.get("type") == "fakeip" for x in new_servers) and "fakeip" in dns:
+                dns.pop("fakeip")
+            # правила, ведущие на rcode://-серверы → action predefined
+            for r in dns.get("rules") or []:
+                if isinstance(r, dict) and r.get("server") in rcode_tags:
+                    rc = rcode_tags[r.pop("server")]
+                    r.pop("action", None)
+                    r.update(action="predefined", rcode=rc)
+            if rcode_tags:
+                notes.append("DNS-серверы rcode:// убраны: правила на них заменены действием predefined ("
+                             + ", ".join(f"{t} → {c}" for t, c in rcode_tags.items()) + ")")
+                if dns.get("final") in rcode_tags:
+                    dns.pop("final")
+                    notes.append("dns.final указывал на rcode-сервер — убран (по умолчанию используется первый сервер)")
+            # серверы с именем хоста без domain_resolver — через local-сервер, если он есть
+            local = next((x.get("tag") for x in new_servers if x.get("type") == "local" and x.get("tag")), None)
+            for x in new_servers:
+                if x.get("server") and not _is_ip(x["server"]) and "domain_resolver" not in x and local and x.get("tag") != local:
+                    x["domain_resolver"] = local
+            notes.append(f"dns.servers: {len(servers)} сервер(ов) переведены в новый формат (type/server)")
+
+    # 2) dns-правила с outbound → domain_resolver (с 1.12)
+    if dns and ver >= (1, 12, 0):
+        keep = []
+        for r in dns.get("rules") or []:
+            if isinstance(r, dict) and "outbound" in r and r.get("server") and not (set(r) - {"outbound", "server", "action"}):
+                ob = r["outbound"] if isinstance(r["outbound"], list) else [r["outbound"]]
+                if "any" in ob:
+                    if not route.get("default_domain_resolver"):
+                        cfg.setdefault("route", route)["default_domain_resolver"] = r["server"]
+                        notes.append(f"dns-правило «outbound: any → {r['server']}» заменено на route.default_domain_resolver")
+                else:
+                    for o in outs:
+                        if o.get("tag") in ob and "domain_resolver" not in o:
+                            o["domain_resolver"] = r["server"]
+                    notes.append(f"dns-правило «outbound: {', '.join(ob)} → {r['server']}» заменено на domain_resolver у этих outbound")
+                continue
+            keep.append(r)
+        if dns.get("rules") is not None:
+            dns["rules"] = keep
+
+    # 3) outbound с адресом-доменом без резолвера: с 1.14 нужен domain_resolver или route.default_domain_resolver
+    if dns and ver >= (1, 12, 0) and not route.get("default_domain_resolver"):
+        need = any(o.get("server") and not _is_ip(str(o["server"])) and "domain_resolver" not in o for o in outs)
+        servers = [x for x in dns.get("servers") or [] if isinstance(x, dict) and x.get("tag")]
+        pick = (next((x["tag"] for x in servers if x.get("type") == "local"), None)
+                or next((x["tag"] for x in servers if _is_ip(str(x.get("server", ""))) and not x.get("detour")), None))
+        if need and pick:
+            cfg.setdefault("route", route)["default_domain_resolver"] = pick
+            notes.append(f"route.default_domain_resolver = «{pick}»: через него резолвятся адреса серверов")
+
+    # 4) tun: inet4_address/… → address/route_address/route_exclude_address (с 1.10), gso убран (1.13)
+    for ib in cfg.get("inbounds") or []:
+        if not isinstance(ib, dict) or ib.get("type") != "tun":
+            continue
+        moved = False
+        for old, new in (("inet4_address", "address"), ("inet6_address", "address"),
+                         ("inet4_route_address", "route_address"), ("inet6_route_address", "route_address"),
+                         ("inet4_route_exclude_address", "route_exclude_address"),
+                         ("inet6_route_exclude_address", "route_exclude_address")):
+            if old in ib and ver >= (1, 10, 0):
+                v = ib.pop(old)
+                ib.setdefault(new, [])
+                ib[new] += v if isinstance(v, list) else [v]
+                moved = True
+        if moved:
+            notes.append(f"tun «{ib.get('tag', 'tun')}»: inet4_/inet6_-поля перенесены в address / route_address")
+        if "gso" in ib and ver >= (1, 11, 0):
+            ib.pop("gso")
+            notes.append("tun: убрано поле gso (больше не работает)")
+
+    # 5) sniff/domain_strategy во входах → действия маршрутизации (с 1.11; удалены в 1.13)
+    if ver >= (1, 11, 0):
+        add_rules = []
+        for ib in cfg.get("inbounds") or []:
+            if not isinstance(ib, dict):
+                continue
+            old = {k: ib.pop(k) for k in INBOUND_OLD if k in ib}
+            if not old:
+                continue
+            sel = {"inbound": [ib["tag"]]} if ib.get("tag") else {}
+            if old.get("sniff"):
+                add_rules.append({**sel, "action": "sniff", **({"timeout": old["sniff_timeout"]} if old.get("sniff_timeout") else {})})
+            if old.get("domain_strategy"):
+                add_rules.append({**sel, "action": "resolve", "strategy": old["domain_strategy"]})
+            notes.append(f"вход «{ib.get('tag', ib.get('type'))}»: {', '.join(old)} → правила маршрутизации (action sniff/resolve)")
+        if add_rules:
+            rules = cfg.setdefault("route", route).setdefault("rules", [])
+            have = {json.dumps(r, sort_keys=True) for r in rules if isinstance(r, dict)}
+            rules[0:0] = [r for r in add_rules if json.dumps(r, sort_keys=True) not in have]
+
+    # 6) outbound block/dns → действия reject / hijack-dns (с 1.11; удалены в 1.13)
+    if ver >= (1, 11, 0):
+        special = {o["tag"]: o["type"] for o in outs if o.get("type") in ("block", "dns") and o.get("tag")}
+        if special:
+            for _, r in _rules(cfg):
+                if r.get("outbound") in special and "action" not in r:
+                    t = special[r.pop("outbound")]
+                    r["action"] = "reject" if t == "block" else "hijack-dns"
+            for o in outs:
+                if isinstance(o.get("outbounds"), list):
+                    o["outbounds"] = [x for x in o["outbounds"] if x not in special]
+            cfg["outbounds"] = [o for o in cfg.get("outbounds") or [] if not (isinstance(o, dict) and o.get("tag") in special)]
+            if route.get("final") in special:
+                route.pop("final")
+            notes.append("outbound " + ", ".join(f"{t} ({v})" for t, v in special.items()) + " → действия reject / hijack-dns в правилах")
+
+    # 7) переименование rule_set_ipcidr_match_source (1.10)
+    if ver >= (1, 10, 0):
+        n = 0
+        for _, r in _rules(cfg):
+            if "rule_set_ipcidr_match_source" in r:
+                r["rule_set_ip_cidr_match_source"] = r.pop("rule_set_ipcidr_match_source")
+                n += 1
+        if n:
+            notes.append(f"rule_set_ipcidr_match_source → rule_set_ip_cidr_match_source ({n})")
+    return cfg, notes
+
+
+def migrate_check(cfg, ver, binary):
+    """Преобразует конфиг и проверяет его бинарником. → (ok, текст, notes, вывод check)."""
+    new, notes = migrate_config(cfg, ver)
+    if not notes:
+        return False, "", notes, "нечего преобразовывать автоматически"
+    text = json.dumps(new, indent=2, ensure_ascii=False) + "\n"
+    cdir = os.path.dirname(os.path.abspath(CONFIG))
+    tmp = os.path.join(cdir, ".panel-migrate.json")
+    with open(tmp, "w") as f:
+        f.write(text)
+    try:
+        rc, out = run([binary, "check", "-c", tmp], cwd=cdir)
+    finally:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+    return rc == 0, text, notes, out[-1500:]
+
+
 def compat_report(cfg, ver):
     """Сверяет используемые поля с версией sing-box (по списку устаревших возможностей из документации).
     Возвращает findings и диапазон версий, на котором конфиг рабочий."""
@@ -2524,8 +2779,33 @@ def compat(user: str = Depends(auth)):
         return {"ok": False, "error": f"Конфиг не прочитан: {e}"}
     raw = sb_version()
     r = compat_report(cfg, parse_ver(raw))
-    r.update(ok=True, version=raw)
+    r.update(ok=True, version=raw, migratable=migrate_config(cfg, parse_ver(raw))[1])
     return r
+
+
+@app.post("/api/compat/migrate")
+def compat_migrate(body: dict, user: str = Depends(auth)):
+    """Перевести устаревшие поля конфига в формат установленной версии: preview — показать и проверить, apply — применить."""
+    raw = sb_version()
+    ver = parse_ver(raw)
+    if not ver:
+        return {"ok": False, "error": "Версия sing-box не определена"}
+    try:
+        cfg = _cfg_read()
+    except (OSError, ValueError) as e:
+        return {"ok": False, "error": f"Конфиг не прочитан: {e}"}
+    ok, text, notes, out = migrate_check(cfg, ver, BINARY)
+    if not notes:
+        return {"ok": False, "error": "Преобразовывать нечего: устаревших полей, которые панель умеет переводить, нет"}
+    if not ok:
+        return {"ok": False, "notes": notes, "error": "Преобразованный конфиг не прошёл проверку sing-box:\n" + out}
+    if body.get("action") != "apply":
+        return {"ok": True, "notes": notes, "text": text}
+    res = apply_config(text, "apply")
+    if res.get("ok"):
+        res["message"] = "Конфиг переведён в новый формат (" + str(len(notes)) + " изм.), служба перезапущена. Прежний — в «Бэкапах»"
+    res["notes"] = notes
+    return res
 
 
 # ------------------------------------------------ обновление sing-box
@@ -2673,8 +2953,9 @@ def _wait_active():
     return _active()
 
 
-def install_binary(src, label):
-    """Подменяет бинарник службы, перезапускает; если служба не поднялась — возвращает прежний."""
+def install_binary(src, label, new_config=None):
+    """Подменяет бинарник службы, перезапускает; если служба не поднялась — возвращает прежний.
+    new_config — текст конфига для новой версии (преобразованный); при неудаче возвращается и прежний конфиг."""
     target = service_binary()
     if not target:
         return {"ok": False, "error": "Не удалось определить путь к бинарнику sing-box"}
@@ -2696,6 +2977,11 @@ def install_binary(src, label):
             shutil.copy2(CONFIG, bk + ".config.json")
         prog(stage="Замена бинарника (прежний сохранён в резервной копии)", pct=40)
         put(src)
+        if new_config is not None:
+            os.makedirs(BACKUPS, exist_ok=True)
+            shutil.copy2(CONFIG, os.path.join(BACKUPS, datetime.now().strftime("config-%Y%m%d-%H%M%S-before-migrate.json")))
+            prog(stage="Запись преобразованного конфига", pct=50)
+            _write_bytes(CONFIG, new_config.encode())
     except OSError as e:
         return {"ok": False, "error": f"Не удалось заменить {target}: {e}"}
     prog(stage="Перезапуск службы sing-box", pct=60)
@@ -2716,8 +3002,11 @@ def install_binary(src, label):
                 "message": f"sing-box {_fv(old_v) if old_v else '?'} → {_fv(nv) if nv else new_line}. Резервная копия: {os.path.basename(bk)}"}
     tail = run(["journalctl", "-u", SERVICE, "-n", "15", "--no-pager"])[1]
     put(bk)
+    if new_config is not None and os.path.isfile(bk + ".config.json"):
+        shutil.copy2(bk + ".config.json", CONFIG)
     run(["systemctl", "restart", SERVICE], timeout=60)
-    return {"ok": False, "error": f"Служба не запустилась с версией {label}, возвращён прежний бинарник.\n\n{tail}"}
+    return {"ok": False, "error": f"Служба не запустилась с версией {label}, возвращён прежний бинарник"
+            + (" и прежний конфиг" if new_config is not None else "") + f".\n\n{tail}"}
 
 
 FRESH_BIN = "/usr/local/bin/sing-box"
@@ -2907,11 +3196,23 @@ def update_prepare(body: dict, user: str = Depends(auth)):
         except (OSError, ValueError):
             comp = []
         meta = {"tag": tag, "sha256": _sha256_file(staged), "version": out.splitlines()[0]}
+        mig = None
+        if crc != 0:                              # новая версия не принимает конфиг — пробуем перевести устаревшие поля
+            prog(stage="Преобразование конфига под новую версию", pct=96)
+            try:
+                m_ok, m_text, m_notes, m_out = migrate_check(_cfg_read(), parse_ver(meta["version"]) or parse_ver(tag), staged)
+            except (OSError, ValueError) as e:
+                m_ok, m_text, m_notes, m_out = False, "", [], str(e)
+            mig = {"ok": m_ok, "notes": m_notes, "output": "" if m_ok else m_out}
+            if m_ok:
+                _write_bytes(os.path.join(wd, "config.migrated.json"), m_text.encode())
+                meta["migrate_src"] = _sha256_file(CONFIG)
         with open(os.path.join(wd, "meta.json"), "w") as f:
             json.dump(meta, f)
         prog(stage="Готово к установке", pct=100, active=False)
         return {"ok": True, "tag": tag, "version": meta["version"], "size": info["size"], "verified": info["verified"],
-                "check_ok": crc == 0, "check_output": cout[-1500:] if crc != 0 else "", "compat": comp,
+                "check_ok": crc == 0 or bool(mig and mig["ok"]), "check_output": cout[-1500:] if crc != 0 else "", "compat": comp,
+                "migrate": mig,
                 "no_config": no_config, "fresh": fresh, "no_unit": not unit_exists(), "replace_config": replace,
                 "old_name": os.path.basename(_old_name(CONFIG)) if replace else ""}
     finally:
@@ -2936,10 +3237,18 @@ def update_install(body: dict, user: str = Depends(auth)):
             return {"ok": False, "error": "Подготовленный файл изменился или пропал — подготовьте версию заново"}
         fresh = not service_binary()
         prog("install", "Проверка подготовленного файла и конфига", 10)
+        migrated = None
+        mpath = os.path.join(wd, "config.migrated.json")
         if os.path.isfile(CONFIG) and not fresh:
             crc, cout = run([staged, "check", "-c", CONFIG], cwd=os.path.dirname(os.path.abspath(CONFIG)))
-            if crc != 0:                      # конфиг мог измениться после подготовки
-                return {"ok": False, "error": "Новая версия не принимает текущий конфиг:\n" + cout[-1500:]}
+            if crc != 0:
+                if os.path.isfile(mpath) and meta.get("migrate_src") == _sha256_file(CONFIG):
+                    with open(mpath) as f:
+                        migrated = f.read()          # преобразованный при подготовке и проверенный новой версией
+                elif os.path.isfile(mpath):
+                    return {"ok": False, "error": "Конфиг изменился после подготовки — нажмите «Скачать и проверить» ещё раз"}
+                else:                                 # конфиг мог измениться после подготовки
+                    return {"ok": False, "error": "Новая версия не принимает текущий конфиг:\n" + cout[-1500:]}
         with LOCK:
             target, need_unit = service_binary(), not unit_exists()
             moved = []                        # (старое имя, новое имя): вернуть при неудаче
@@ -2974,7 +3283,9 @@ def update_install(body: dict, user: str = Depends(auth)):
                 _undo_moves(moved)
                 return {"ok": False, "error": f"Не удалось создать конфиг: {e}"}
             if target and not need_unit:
-                res = install_binary(staged, meta["version"])
+                res = install_binary(staged, meta["version"], migrated)
+                if res["ok"] and migrated:
+                    res["message"] += ". Конфиг переведён в формат новой версии (прежний — в резервной копии рядом с бинарником и в «Бэкапах»)"
             else:
                 res = install_fresh(staged, meta["version"], target, need_unit)
                 if not res["ok"] and created:
