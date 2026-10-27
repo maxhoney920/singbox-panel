@@ -1,0 +1,28 @@
+# При пуше тега vX.Y.Z собирает deb-пакет, установщик и latest.json и выкладывает их в GitHub Releases.
+name: release
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Сборка
+        run: |
+          VER="${GITHUB_REF_NAME#v}"
+          ./build-deb.sh "$VER"
+          ./make-bundle.sh "$VER"
+          # текст релиза — раздел этой версии из CHANGELOG.md
+          awk -v v="## $VER" '$0==v{f=1;next} /^## /{f=0} f' CHANGELOG.md > notes.md
+          printf '\n**Установка:** `sudo apt install ./singbox-panel_%s_all.deb` или `sudo bash singbox-panel-installer.sh`.\n`latest.json` — файл для самообновления панели.\n' "$VER" >> notes.md
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: singbox-panel ${{ github.ref_name }}
+          body_path: notes.md
+          files: |
+            singbox-panel_*_all.deb
+            singbox-panel-installer.sh
+            latest.json
