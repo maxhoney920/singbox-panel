@@ -1,8 +1,12 @@
-# При пуше тега vX.Y.Z собирает deb-пакет, установщик и latest.json и выкладывает их в GitHub Releases.
+# Сборка deb-пакета, установщика и latest.json и публикация в GitHub Releases.
+# Срабатывает, когда в main меняется CHANGELOG.md: версия берётся из первого раздела «## X.Y.Z».
+# Если релиз vX.Y.Z уже есть, ничего не делает. Можно запустить и вручную (Actions → release → Run workflow).
 name: release
 on:
   push:
-    tags: ["v*"]
+    branches: [main]
+    paths: [CHANGELOG.md]
+  workflow_dispatch:
 permissions:
   contents: write
 jobs:
@@ -10,17 +14,28 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Сборка
+      - name: Версия из CHANGELOG.md
+        id: ver
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          VER="${GITHUB_REF_NAME#v}"
+          VER="$(sed -n 's/^## \([0-9][0-9.]*\)$/\1/p' CHANGELOG.md | head -n1)"
+          echo "ver=$VER" >> "$GITHUB_OUTPUT"
+          if gh release view "v$VER" >/dev/null 2>&1; then echo "skip=1" >> "$GITHUB_OUTPUT"; echo "Релиз v$VER уже есть"; fi
+      - name: Сборка
+        if: steps.ver.outputs.skip != '1'
+        run: |
+          VER="${{ steps.ver.outputs.ver }}"
           ./build-deb.sh "$VER"
           ./make-bundle.sh "$VER"
-          # текст релиза — раздел этой версии из CHANGELOG.md
           awk -v v="## $VER" '$0==v{f=1;next} /^## /{f=0} f' CHANGELOG.md > notes.md
           printf '\n**Установка:** `sudo apt install ./singbox-panel_%s_all.deb` или `sudo bash singbox-panel-installer.sh`.\n`latest.json` — файл для самообновления панели.\n' "$VER" >> notes.md
       - uses: softprops/action-gh-release@v2
+        if: steps.ver.outputs.skip != '1'
         with:
-          name: singbox-panel ${{ github.ref_name }}
+          tag_name: v${{ steps.ver.outputs.ver }}
+          target_commitish: ${{ github.sha }}
+          name: singbox-panel ${{ steps.ver.outputs.ver }}
           body_path: notes.md
           files: |
             singbox-panel_*_all.deb
