@@ -30,6 +30,8 @@ input,select,textarea{background:var(--bg);color:var(--tx);border:1px solid var(
 input[type=text],input[type=password],input[type=number]{min-width:0}
 textarea{width:100%;font:12.5px/1.4 ui-monospace,Menlo,monospace;resize:vertical}
 .grow{flex:1;min-width:180px}
+select{max-width:100%}
+td code{word-break:break-all}
 table{width:100%;border-collapse:collapse}
 td,th{text-align:left;padding:6px 8px;border-bottom:1px solid var(--bd);vertical-align:top}
 th{color:var(--mu);font-weight:500;font-size:12px}
@@ -98,6 +100,38 @@ tr.node{cursor:pointer}tr.node:hover{background:#1f2533}tr.node.act{background:#
 #health-banner{background:#3b1a1a;border-bottom:1px solid #6e2a2a;padding:10px 20px;display:none}
 #health-banner .row{margin:0}
 .env-item{margin:8px 0}.env-item .et{font-weight:600}.env-item .dt,.env-item .fx{color:var(--mu);font-size:12.5px;word-break:break-all}
+
+/* ---------- телефоны ---------- */
+@media (max-width:720px){
+  header{display:grid;grid-template-columns:1fr auto auto;gap:6px 8px;padding:8px 12px 0}
+  header h1{grid-row:1;grid-column:1;font-size:15px}
+  header #who{display:none}
+  header .lang{grid-row:1;grid-column:2}
+  header>.btn{grid-row:1;grid-column:3;padding:6px 12px}
+  nav{grid-row:2;grid-column:1/-1;flex-wrap:nowrap;overflow-x:auto;gap:2px;margin:0 -12px;padding:2px 12px 8px;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+  nav::-webkit-scrollbar{display:none}
+  nav button{flex:none;white-space:nowrap;padding:7px 11px}
+  #subnav{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;margin-left:-12px;margin-right:-12px;padding:0 12px 2px}
+  #subnav::-webkit-scrollbar{display:none}
+  #subnav button{flex:none;white-space:nowrap}
+  main{margin:12px auto;padding:0 12px}
+  .card{padding:12px;border-radius:10px}
+  .grid{grid-template-columns:repeat(auto-fit,minmax(140px,1fr))}
+  .grow{min-width:120px}
+  .row{gap:6px}
+  table.stack tr{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 12px;padding:8px 0;border-bottom:1px solid var(--bd)}
+  table.stack td{border:0;padding:0}
+  table.stack td:first-child{flex-basis:100%;word-break:break-all}
+  table.stack td.act{flex-basis:100%;text-align:left;white-space:normal}
+  table.stack td.act button{margin:4px 6px 0 0;padding:6px 10px}
+  dialog{padding:14px}
+  #toast{left:12px;right:12px;bottom:12px;max-width:none}
+  .lang-menu{right:-60px}
+  .rtbl thead{display:none}
+  .rtbl tr{display:grid;grid-template-columns:22px 1fr auto;grid-template-areas:"n a b" "c c c";gap:4px 8px;padding:8px 0;border-bottom:1px solid var(--bd)}
+  .rtbl td{border:0;padding:0;min-width:0}
+  .rtbl td:nth-child(1){grid-area:n}.rtbl td:nth-child(2){grid-area:c;word-break:break-all}.rtbl td:nth-child(3){grid-area:a}.rtbl td:nth-child(4){grid-area:b}
+}
 </style>
 </head>
 <body>
@@ -155,7 +189,7 @@ tr.node{cursor:pointer}tr.node:hover{background:#1f2533}tr.node.act{background:#
     </div>
   </div>
   <div class="card" id="subinfo-card" style="display:none">
-    <div class="row" style="margin-top:0"><b>Подписка</b><span class="grow"></span><button class="btn sec" onclick="subInfoRefresh(this)" title="Спросить у сервера подписки срок и остаток трафика (конфиг не меняется)">↻ Обновить</button></div>
+    <div class="row" style="margin-top:0"><b>Подписка</b><span style="flex:1"></span><button class="btn sec" onclick="subInfoRefresh(this)" title="Спросить у сервера подписки срок и остаток трафика (конфиг не меняется)">↻ Обновить</button></div>
     <div id="subinfo-list"></div>
   </div>
   <div class="card">
@@ -309,7 +343,7 @@ tr.node{cursor:pointer}tr.node:hover{background:#1f2533}tr.node.act{background:#
 <section id="tab-route">
   <div class="card">
     <div class="row"><b>Правила маршрутизации</b><span class="mu">— проверяются сверху вниз, срабатывает первое совпавшее</span></div>
-    <table><thead><tr><th>#</th><th>Условие</th><th>Действие</th><th></th></tr></thead><tbody id="rules"></tbody></table>
+    <table class="rtbl"><thead><tr><th>#</th><th>Условие</th><th>Действие</th><th></th></tr></thead><tbody id="rules"></tbody></table>
     <div id="r-extra"></div>
     <div class="row" id="rp-upd" style="display:none"><span class="d-mid">Часть правил создана из наборов прежней версии панели.</span><button class="btn sec" onclick="presetsUpdate()">Обновить списки наборов</button></div>
     <div class="row" style="margin-top:12px">
@@ -409,7 +443,7 @@ tr.node{cursor:pointer}tr.node:hover{background:#1f2533}tr.node.act{background:#
   </div>
   <div class="card">
     <b>Бэкапы</b> <span class="mu">(создаются перед каждым сохранением)</span>
-    <table><tbody id="bk"></tbody></table>
+    <table class="stack"><tbody id="bk"></tbody></table>
   </div>
 </section>
 
@@ -449,7 +483,7 @@ tr.node{cursor:pointer}tr.node:hover{background:#1f2533}tr.node.act{background:#
   </div>
   <div class="card">
     <b>Резервные копии бинарника</b> <span class="mu">(последние 5)</span>
-    <table><tbody id="u-bk"></tbody></table>
+    <table class="stack"><tbody id="u-bk"></tbody></table>
   </div>
   <div class="card" id="os-card">
     <div class="row" style="margin-top:0"><b>Операционная система</b><span class="mu" id="os-name"></span></div>

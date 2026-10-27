@@ -1,3 +1,7 @@
+## 2.3.1
+- Phone layout: a compact header (the menu scrolls in one line, language and "Log out" on top), settings sub-tabs in one line, backup and routing rule tables turn into cards, long names and JSON wrap, nothing goes beyond the screen edge
+- Fixed the date of sing-box binary backups: "1970-01-01" was shown for a binary from a package
+
 ## 2.3.0
 - sing-box update: if the new version does not accept the config because of outdated fields, the panel converts them to the new format (DNS servers address → type, dns rules with outbound → domain_resolver, tun inet4_* fields, sniff/domain_strategy on inbounds, block/dns outbounds → reject/hijack-dns actions), checks the result with the new version and shows the list of changes. The config is written only during installation, the previous one is kept; if the service does not come up, both the binary and the config are restored
 - sing-box messages are shown without color codes like "[31mFATAL[0m"

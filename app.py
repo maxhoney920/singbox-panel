@@ -2973,6 +2973,7 @@ def install_binary(src, label, new_config=None):
 
     try:
         shutil.copy2(target, bk)
+        os.utime(bk, None)                    # время копии — сейчас (у бинарника из пакета mtime бывает 1970-01-01)
         if os.path.isfile(CONFIG):            # конфиг на момент замены — пара к этой копии бинарника
             shutil.copy2(CONFIG, bk + ".config.json")
         prog(stage="Замена бинарника (прежний сохранён в резервной копии)", pct=40)
@@ -3159,7 +3160,7 @@ def update_info(refresh: int = 0, user: str = Depends(auth)):
         for n in sorted(names, key=lambda n: os.path.getmtime(os.path.join(BIN_BACKUPS, n)), reverse=True):
             p = os.path.join(BIN_BACKUPS, n)
             backups.append({"name": n, "size": os.path.getsize(p), "has_config": os.path.isfile(p + ".config.json"),
-                            "time": datetime.fromtimestamp(os.path.getmtime(p)).strftime("%Y-%m-%d %H:%M")})
+                            "time": _bk_time(n, p)})
     return {"ok": True, "version": raw, "binary": target, "arch": platform.machine(), "dpkg": pkg, "pkg_name": pkg_name,
             "held": bool(pkg_name) and pkg_name in run(["apt-mark", "showhold"])[1].split(),
             "fresh": not target, "no_config": not os.path.isfile(CONFIG), "no_unit": not unit_exists(),
@@ -3311,6 +3312,17 @@ def update_install(body: dict, user: str = Depends(auth)):
     finally:
         PROG["active"] = False
         UPDATE_LOCK.release()
+
+
+def _bk_time(name, path):
+    """Время резервной копии: из имени (…-20261027-235838), иначе по mtime файла."""
+    m = re.search(r"-(\d{8})-(\d{6})$", name)
+    if m:
+        try:
+            return datetime.strptime(m.group(1) + m.group(2), "%Y%m%d%H%M%S").strftime("%Y-%m-%d %H:%M")
+        except ValueError:
+            pass
+    return datetime.fromtimestamp(os.path.getmtime(path)).strftime("%Y-%m-%d %H:%M")
 
 
 def dpkg_owner(path):
