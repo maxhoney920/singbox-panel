@@ -1471,7 +1471,7 @@ def _startup():
 
 
 # ------------------------------------------------- готовые наборы маршрутизации
-PRESET_REV = 1           # увеличивайте при изменении списков; прежние списки добавляйте в PRESET_HISTORY
+PRESET_REV = 2           # увеличивайте при изменении списков; прежние списки добавляйте в PRESET_HISTORY
 PRESETS = {
     "lan": {"t": "Локальные адреса (192.168.x.x, 10.x.x.x…)", "d": "direct",
             "r": [{"ip_cidr": ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.0/8"]}]},
@@ -1490,16 +1490,18 @@ PRESETS = {
     "twitter": {"t": "X (Twitter)", "d": "proxy", "r": [{"domain_suffix": ["twitter.com", "x.com", "twimg.com", "t.co"]}]},
     "netflix": {"t": "Netflix", "d": "proxy", "r": [{"domain_suffix": ["netflix.com", "nflxvideo.net", "nflximg.net", "nflxext.com", "nflxso.net"]}]},
     "spotify": {"t": "Spotify", "d": "proxy", "r": [{"domain_suffix": ["spotify.com", "scdn.co", "spotifycdn.com"]}]},
+    "reddit": {"t": "Reddit", "d": "proxy", "r": [{"domain_suffix": [
+        "reddit.com", "redd.it", "redditmedia.com", "redditstatic.com", "reddituploads.com", "redditinc.com"]}]},
 }
 # прежние версии списков: {id набора: {поле: [[старый список], …]}}. Правило с таким списком при обновлении получит новый.
 PRESET_HISTORY = {}
 PRESET_BUILTIN_REV = PRESET_REV          # наборы, вшитые в эту версию панели
 
-# Свежие списки наборов лежат в репозитории (presets.json) и скачиваются отдельно от панели — раз в сутки и по кнопке.
+# Свежие списки наборов лежат в репозитории (presets.json) и скачиваются отдельно от панели — раз в 2 часа и по кнопке.
 # Скачивание только обновляет списки в панели; в конфиг они попадают по кнопке «Обновить списки наборов».
 PRESETS_URL = "https://raw.githubusercontent.com/maxhoney920/singbox-panel/main/presets.json"
 PRESETS_FILE = os.path.join(DATA, "presets.json")
-PRESETS_EVERY = 24 * 3600
+PRESETS_EVERY = 2 * 3600
 PRESET_FIELDS = ("domain_suffix", "domain", "domain_keyword", "ip_cidr")
 _presets = {"source": "встроенные", "checked": 0, "error": ""}
 
@@ -1599,7 +1601,7 @@ def presets_loop():
                 presets_fetch()
             except Exception:
                 traceback.print_exc()
-        time.sleep(3600)
+        time.sleep(600)
 
 
 def _preset_rule_field(rule):
@@ -2619,7 +2621,7 @@ def fetch_releases():
         tag = rel.get("tag_name", "")
         out.append({"tag": tag, "prerelease": bool(rel.get("prerelease")), "published": (rel.get("published_at") or "")[:10],
                     "url": asset.get("browser_download_url", ""), "size": asset.get("size"),
-                    "digest": asset.get("digest") or ""})
+                    "digest": asset.get("digest") or "", "notes": (rel.get("body") or "")[:8000]})
     return out
 
 
@@ -2853,7 +2855,7 @@ def update_info(refresh: int = 0, user: str = Depends(auth)):
     try:
         for r in get_releases(bool(refresh)):
             v = parse_ver(r["tag"])
-            rels.append({"tag": r["tag"], "prerelease": r["prerelease"], "published": r["published"],
+            rels.append({"tag": r["tag"], "prerelease": r["prerelease"], "published": r["published"], "notes": r.get("notes", ""),
                          "size": r["size"], "verified": r["digest"].startswith("sha256:"),
                          "newer": bool(cur and v and v > cur), "current": bool(cur and v == cur)})
     except (OSError, ValueError) as e:        # URLError — подкласс OSError
@@ -3469,7 +3471,7 @@ PANEL_UPDATE_SOURCES = [
     ("Google Drive", "https://drive.google.com/drive/folders/1nJ-5Imc3A7f5x_yVYk_vYEMUxWz4J4vU"),
 ]
 PANEL_UPDATE_URL = ""          # для тестов/отладки: если задан, используется вместо списка выше
-PU_INTERVAL = 24 * 3600                                              # проверка новых версий раз в сутки; ставится только по кнопке
+PU_INTERVAL = 2 * 3600                                               # проверка новых версий раз в 2 часа; ставится только по кнопке
 PANEL_DEBS = os.path.join(DATA, "panel-debs")
 PKG_NAME = "singbox-panel"
 FILE_RE = re.compile(r"^singbox-panel_[0-9][0-9A-Za-z.+~-]*_all\.deb$")

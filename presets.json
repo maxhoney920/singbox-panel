@@ -1,6 +1,6 @@
 {
   "_doc": "Готовые наборы маршрутизации singbox-panel. После правки увеличьте rev; прежние списки, которые меняете, перенесите в history[id][поле] — так панель узнает и обновит правила, созданные из них.",
-  "rev": 1,
+  "rev": 2,
   "presets": {
     "lan": {
       "t": "Локальные адреса (192.168.x.x, 10.x.x.x…)",
@@ -170,6 +170,23 @@
             "spotify.com",
             "scdn.co",
             "spotifycdn.com"
+          ]
+        }
+      ]
+    },
+    "reddit": {
+      "t": "Reddit",
+      "t_en": "Reddit",
+      "d": "proxy",
+      "r": [
+        {
+          "domain_suffix": [
+            "reddit.com",
+            "redd.it",
+            "redditmedia.com",
+            "redditstatic.com",
+            "reddituploads.com",
+            "redditinc.com"
           ]
         }
       ]
