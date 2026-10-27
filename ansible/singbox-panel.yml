@@ -1,0 +1,87 @@
+---
+# ansible-playbook -i inventory singbox-panel.yml
+# Файлы app.py и index.html лежат на уровень выше этого плейбука.
+- name: Установка singbox-panel
+  hosts: singbox
+  become: true
+  vars:
+    panel_dir: /opt/singbox-panel
+    panel_port: 8088
+    panel_host: 0.0.0.0
+    panel_groups: sudo
+    panel_users: ""
+    singbox_config: /etc/sing-box/config.json
+    singbox_service: sing-box
+    singbox_tun: ""
+  tasks:
+    - name: Пакеты
+      ansible.builtin.apt:
+        name: [python3, libpam0g, iproute2]
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Каталог панели
+      ansible.builtin.file:
+        path: "{{ panel_dir }}"
+        state: directory
+        mode: "0755"
+
+    - name: Код панели
+      ansible.builtin.copy:
+        src: "{{ item }}"
+        dest: "{{ panel_dir }}/{{ item }}"
+        mode: "0644"
+      loop: [app.py, index.html]
+      notify: restart panel
+
+    - name: Файл настроек
+      ansible.builtin.copy:
+        dest: /etc/default/singbox-panel
+        mode: "0644"
+        content: |
+          SBP_PORT={{ panel_port }}
+          SBP_HOST={{ panel_host }}
+          SBP_CONFIG={{ singbox_config }}
+          SBP_SERVICE={{ singbox_service }}
+          SBP_GROUPS={{ panel_groups }}
+          {% if panel_users %}SBP_USERS={{ panel_users }}
+          {% endif %}
+          {% if singbox_tun %}SBP_TUN={{ singbox_tun }}
+          {% endif %}
+      notify: restart panel
+
+    - name: systemd-юнит
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/singbox-panel.service
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=sing-box web panel
+          After=network.target
+
+          [Service]
+          Type=simple
+          WorkingDirectory={{ panel_dir }}
+          EnvironmentFile=-/etc/default/singbox-panel
+          ExecStart=/usr/bin/python3 -I {{ panel_dir }}/app.py
+          Restart=on-failure
+          RestartSec=3
+
+          [Install]
+          WantedBy=multi-user.target
+      notify: restart panel
+
+    - name: Служба включена и запущена
+      ansible.builtin.systemd:
+        name: singbox-panel
+        enabled: true
+        state: started
+        daemon_reload: true
+
+  handlers:
+    - name: restart panel
+      ansible.builtin.systemd:
+        name: singbox-panel
+        state: restarted
+        daemon_reload: true

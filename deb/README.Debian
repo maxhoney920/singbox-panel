@@ -1,0 +1,31 @@
+singbox-panel
+=============
+
+Панель слушает 0.0.0.0:8088, вход по системным логину и паролю (PAM),
+по умолчанию разрешены члены группы sudo. Настройки: /etc/default/singbox-panel.
+
+  systemctl status singbox-panel
+  journalctl -u singbox-panel -f
+
+Панель работает от root и рассчитана на доверенную локальную сеть.
+Не пробрасывайте её порт в интернет.
+
+Вкладка Настройки → Сеть (всё включается только кнопкой и откатывается):
+  * шлюз для устройств сети: sysctl + правила iptables, отдельная служба
+    singbox-panel-gateway; выключение возвращает всё как было;
+  * SOCKS5/HTTP-прокси внутри sing-box (порты 1080/1081);
+  * запрет входа в веб-интерфейс из локальной сети (только 127.0.0.1).
+Запасной выход из консоли:
+  sudo singbox-panel lan on          вернуть доступ из локальной сети
+  sudo singbox-panel p2p on|off|status  BitTorrent напрямую (правило в конфиге)
+  sudo singbox-panel gateway off     выключить режим шлюза
+  sudo singbox-panel proxy remove    удалить контейнер прокси
+
+Удаление:
+  apt remove singbox-panel   - убрать пакет, оставить бэкапы и настройки
+  apt purge singbox-panel    - убрать всё, включая /var/lib/singbox-panel
+                               и правила шлюза
+
+Лимиты CPU/RAM, заданные из панели, лежат в drop-ин файлах службы sing-box
+(/etc/systemd/system/<служба>.service.d/) и при удалении панели остаются:
+они принадлежат sing-box, а не панели.

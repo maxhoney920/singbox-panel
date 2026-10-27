@@ -1,0 +1,19 @@
+Package: singbox-panel
+Version: @VERSION@
+Architecture: all
+Section: net
+Priority: optional
+Maintainer: @MAINTAINER@
+Depends: python3 (>= 3.7), libpam0g, systemd, iproute2
+Suggests: sing-box
+Installed-Size: @SIZE@
+Description: web panel for the sing-box client (TUN) on a headless server
+ Small self-contained web interface for managing a sing-box client:
+ status, traffic and device load, start/stop/restart, subscription import,
+ manual server selection, routing rules, systemd CPU/RAM limits,
+ config editor with validation and backups, and sing-box binary updates.
+ Optional (buttons only, fully reversible): LAN gateway mode, a built-in
+ SOCKS5/HTTP proxy inbound in sing-box, and a localhost-only switch.
+ .
+ Login uses system accounts (PAM). Runs as root, intended for a trusted LAN.
+ Only Python 3 standard library is used; nothing is downloaded at install time.

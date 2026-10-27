@@ -1,0 +1,28 @@
+# Настройки singbox-panel. После правки: systemctl restart singbox-panel
+# Показаны значения по умолчанию; раскомментируйте строку, чтобы изменить.
+
+# Адрес и порт панели (можно привязать к одному IP из локальной сети)
+#SBP_HOST=0.0.0.0
+#SBP_PORT=8088
+
+# Конфиг sing-box, который редактирует панель
+#SBP_CONFIG=/etc/sing-box/config.json
+
+# Имя systemd-службы sing-box (по умолчанию ищется само: sing-box, sing-box-*)
+#SBP_SERVICE=sing-box
+
+# Кому можно входить: члены групп И/ИЛИ перечисленные пользователи
+#SBP_GROUPS=sudo
+#SBP_USERS=
+
+# Имя TUN-интерфейса (по умолчанию определяется само)
+#SBP_TUN=
+
+# Путь к бинарнику sing-box (по умолчанию берётся из ExecStart службы)
+#SBP_BINARY=
+
+# PAM-сервис для проверки пароля
+#SBP_PAM_SERVICE=login
+
+# Каталог данных панели (бэкапы, подписка, копии бинарника)
+#SBP_DATA=/var/lib/singbox-panel

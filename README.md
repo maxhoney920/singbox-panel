@@ -1,0 +1,55 @@
+# singbox-panel
+
+Веб-панель для управления клиентом [sing-box](https://github.com/SagerNet/sing-box) на headless-сервере Debian/Ubuntu/Armbian (например, NanoPi R3S). Сервер написан на чистом Python (только стандартная библиотека, Python 3.7+), интерфейс — одна HTML-страница. Работает на ARM и x86.
+
+*A small web panel for managing a sing-box client (TUN) on a headless Debian server. Pure-stdlib Python 3.7+, single-page UI, Russian and English interface.*
+
+## Возможности
+
+- Статус службы, графики трафика и нагрузки устройства (масштаб, логарифмическая шкала), трафик за сессию и за всё время
+- Подписки (sing-box JSON и base64-списки ссылок) и отдельные ключи `vless://`, `vmess://`, `trojan://`, `ss://`, `hysteria2://`; срок действия и остаток трафика подписки на главной
+- Выбор сервера на лету через Clash API, резервный сервер с автоматическим переключением
+- Маршрутизация: таблица правил, готовые наборы (YouTube, Telegram, российские домены и др.), BitTorrent напрямую
+- Сеть (всё только по кнопке и обратимо): режим шлюза для устройств LAN, DNS в sing-box, SOCKS5/HTTP-прокси
+- Установка и обновление sing-box с GitHub с проверкой конфига и откатом, мастер быстрого старта
+- Самообновление панели (проверка раз в сутки, установка только по кнопке), «Удалить всё»
+- Вход по системным учёткам (PAM), английский интерфейс
+
+## Установка
+
+Из deb-пакета:
+
+```sh
+sudo apt install ./singbox-panel_X.Y.Z_all.deb
+```
+
+Или одним файлом-установщиком (без dpkg):
+
+```sh
+sudo bash singbox-panel-installer.sh
+```
+
+Панель откроется на `http://<IP устройства>:8088`, вход — системный логин и пароль (по умолчанию группа `sudo`). Настройки: `/etc/default/singbox-panel`, логи: `journalctl -u singbox-panel -f`.
+
+Панель работает от root и рассчитана на доверенную локальную сеть — не открывайте её порт в интернет.
+
+## Сборка
+
+```sh
+./build-deb.sh 2.0.0     # singbox-panel_2.0.0_all.deb + latest.json для самообновления
+./make-bundle.sh         # singbox-panel-installer.sh (версия берётся из latest.json)
+```
+
+Нужны `dpkg-deb` и `python3`. Изменения описываются в `CHANGELOG.md` (раздел `## X.Y.Z`) — из него собирается список «Что нового».
+
+## Состав
+
+| Файл | Назначение |
+|---|---|
+| `app.py` | сервер панели (HTTP, PAM, systemd, sing-box, подписки, шлюз…) |
+| `index.html` | интерфейс (включая словарь английского перевода) |
+| `deb/` | файлы пакета: control, postinst/prerm/postrm, PAM-служба, настройки по умолчанию |
+| `install.sh` | установка без пакета (`/opt/singbox-panel`) |
+| `ansible/` | плейбук для установки на несколько машин |
+
+Сделано с любовью [safe-internet](https://t.me/serv1897236bot) ♥

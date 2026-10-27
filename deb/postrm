@@ -1,0 +1,40 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+remove)
+    rm -rf /usr/lib/singbox-panel/__pycache__
+    if [ -d /run/systemd/system ]; then
+        systemctl --system daemon-reload >/dev/null || true
+    fi
+    ;;
+purge)
+    # если режим шлюза остался включённым — вернуть правила iptables и sysctl
+    if [ -f /var/lib/singbox-panel/gateway/down.sh ]; then
+        sh /var/lib/singbox-panel/gateway/down.sh >/dev/null 2>&1 || true
+    fi
+    if [ -f /etc/systemd/system/singbox-panel-gateway.service ]; then
+        systemctl disable singbox-panel-gateway.service >/dev/null 2>&1 || true
+        rm -f /etc/systemd/system/singbox-panel-gateway.service
+    fi
+    rm -rf /usr/lib/singbox-panel
+    if [ -x /usr/bin/deb-systemd-helper ]; then
+        deb-systemd-helper purge singbox-panel.service >/dev/null || true
+        deb-systemd-helper unmask singbox-panel.service >/dev/null || true
+    fi
+    # бэкапы конфигов, подписка, копии бинарника sing-box
+    rm -rf /var/lib/singbox-panel
+    rm -f /etc/default/singbox-panel
+    if [ -d /run/systemd/system ]; then
+        systemctl --system daemon-reload >/dev/null || true
+    fi
+    ;;
+upgrade|failed-upgrade|abort-install|abort-upgrade|disappear)
+    ;;
+*)
+    echo "postrm called with unknown argument '$1'" >&2
+    exit 1
+    ;;
+esac
+
+exit 0

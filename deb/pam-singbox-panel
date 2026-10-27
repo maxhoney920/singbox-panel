@@ -1,0 +1,5 @@
+# PAM-служба веб-панели singbox-panel.
+# Отдельная служба нужна, чтобы вход не зависел от /etc/pam.d/login: там pam_securetty
+# запрещает root вход без терминала (в панели его нет), а pam_nologin/limits/motd не нужны.
+@include common-auth
+@include common-account

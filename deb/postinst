@@ -1,0 +1,58 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+configure)
+    # Миграция с install.sh/Ansible: старый юнит в /etc перекрывал бы юнит пакета
+    OLD_UNIT=/etc/systemd/system/singbox-panel.service
+    if [ -f "$OLD_UNIT" ] && grep -q '/opt/singbox-panel' "$OLD_UNIT" 2>/dev/null; then
+        echo "singbox-panel: найдена установка через install.sh, перехожу на пакет"
+        if [ -d /run/systemd/system ]; then
+            systemctl stop singbox-panel.service >/dev/null 2>&1 || true
+            systemctl disable singbox-panel.service >/dev/null 2>&1 || true
+        fi
+        rm -f "$OLD_UNIT"
+        rm -rf /opt/singbox-panel
+    fi
+
+    mkdir -p /var/lib/singbox-panel
+    chmod 755 /var/lib/singbox-panel
+
+    deb-systemd-helper unmask singbox-panel.service >/dev/null || true
+    # was-enabled по умолчанию true: при первой установке служба включается,
+    # при обновлении учитывается выбор администратора (disable остаётся в силе)
+    if deb-systemd-helper --quiet was-enabled singbox-panel.service; then
+        deb-systemd-helper enable singbox-panel.service >/dev/null || true
+    else
+        deb-systemd-helper update-state singbox-panel.service >/dev/null || true
+    fi
+
+    if [ -d /run/systemd/system ]; then
+        systemctl --system daemon-reload >/dev/null || true
+        if [ -n "$2" ]; then
+            # обновление: перезапустить, если служба работает (иначе страницы нового пакета отдаёт старый код)
+            systemctl try-restart singbox-panel.service >/dev/null 2>&1 || true
+        else
+            deb-systemd-invoke start singbox-panel.service >/dev/null || true
+        fi
+    fi
+
+    if [ -z "$2" ]; then
+        PORT=8088
+        [ -r /etc/default/singbox-panel ] && \
+            P=$(sed -n 's/^SBP_PORT=//p' /etc/default/singbox-panel | tail -n1) && [ -n "$P" ] && PORT="$P"
+        echo "singbox-panel установлен. Адрес панели:"
+        for ip in $(hostname -I 2>/dev/null); do echo "    http://$ip:$PORT"; done
+        echo "Вход: системный логин и пароль (по умолчанию группа sudo)."
+        echo "Настройки: /etc/default/singbox-panel   Логи: journalctl -u singbox-panel -f"
+    fi
+    ;;
+abort-upgrade|abort-remove|abort-deconfigure)
+    ;;
+*)
+    echo "postinst called with unknown argument '$1'" >&2
+    exit 1
+    ;;
+esac
+
+exit 0

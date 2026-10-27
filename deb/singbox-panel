@@ -1,0 +1,10 @@
+#!/bin/sh
+# Служебные команды панели (запасной выход из консоли):
+#   singbox-panel lan on|off|status   доступ к веб-интерфейсу из локальной сети
+#   singbox-panel gateway off         выключить режим шлюза и вернуть настройки ядра
+#   singbox-panel proxy remove        удалить контейнер прокси
+if [ $# -eq 0 ]; then sed -n '2,5p' "$0" | sed 's/^# \{0,1\}//'; exit 2; fi
+set -a
+[ -r /etc/default/singbox-panel ] && . /etc/default/singbox-panel
+set +a
+exec /usr/bin/python3 -I /usr/lib/singbox-panel/app.py "$@"
