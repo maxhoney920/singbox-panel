@@ -3348,7 +3348,13 @@ def busy_ports():
 
 
 # ------------------------------------- обновление самой панели со своего файлового сервера
-PANEL_UPDATE_URL = "https://drive.google.com/drive/folders/1nJ-5Imc3A7f5x_yVYk_vYEMUxWz4J4vU"   # зашито в пакет, из интерфейса не меняется
+# Источники обновлений панели (зашиты в пакет, из интерфейса не меняются), по порядку: основной — релизы GitHub,
+# резервный — общая папка Google Drive. latest.json и пакет берутся из одного и того же источника.
+PANEL_UPDATE_SOURCES = [
+    ("GitHub", "https://github.com/maxhoney920/singbox-panel/releases/latest/download"),
+    ("Google Drive", "https://drive.google.com/drive/folders/1nJ-5Imc3A7f5x_yVYk_vYEMUxWz4J4vU"),
+]
+PANEL_UPDATE_URL = ""          # для тестов/отладки: если задан, используется вместо списка выше
 PU_INTERVAL = 24 * 3600                                              # проверка новых версий раз в сутки; ставится только по кнопке
 PANEL_DEBS = os.path.join(DATA, "panel-debs")
 PKG_NAME = "singbox-panel"
@@ -3373,10 +3379,14 @@ def gd_parse(html):
     return out
 
 
-def _pu_urls(name, opener=None):
-    """Адреса, по которым можно скачать файл из корня папки обновлений.
-    Обычный каталог: <url>/<имя>. Общая папка Google Drive: находим id файла по списку папки."""
-    u = PANEL_UPDATE_URL.rstrip("/")
+def _pu_sources():
+    return [("", PANEL_UPDATE_URL)] if PANEL_UPDATE_URL else list(PANEL_UPDATE_SOURCES)
+
+
+def _pu_urls(name, opener=None, base=None):
+    """Адреса, по которым можно скачать файл из источника обновлений.
+    Обычный каталог (и релизы GitHub): <url>/<имя>. Общая папка Google Drive: находим id файла по списку папки."""
+    u = (base or PANEL_UPDATE_URL or PANEL_UPDATE_SOURCES[0][1]).rstrip("/")
     m = GD_RE.match(u)
     if not m:
         return [u + "/" + urllib.parse.quote(name)]
@@ -3391,14 +3401,29 @@ def _pu_urls(name, opener=None):
             f"https://drive.google.com/uc?export=download&id={fid}&confirm=t"]
 
 
-def pu_open(name):
-    """Открывает файл с сервера обновлений. Ошибки собираются по всем вариантам адреса."""
+def pu_open(name, prefer=None):
+    """Открывает файл обновления: по очереди из источников (сначала prefer — откуда взят latest.json).
+    Возвращает ответ; название источника — в _pu["src"]."""
+    srcs = _pu_sources()
+    srcs.sort(key=lambda s: s[0] != prefer)
+    errs = []
+    for label, base in srcs:
+        try:
+            r = _pu_open_one(name, base)
+            _pu["src"] = label
+            return r
+        except OSError as e:
+            errs.append(f"{label}: {e}" if label else str(e))
+    raise OSError("; ".join(errs))
+
+
+def _pu_open_one(name, base):
     import http.cookiejar
     op = urllib.request.build_opener(urllib.request.ProxyHandler({}), urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
     op.addheaders = [("User-Agent", "Mozilla/5.0 (X11; Linux) singbox-panel/" + APP_VERSION)]
     errs = []
     try:
-        urls = _pu_urls(name, op)
+        urls = _pu_urls(name, op, base)
     except urllib.error.HTTPError as e:
         raise OSError(f"список папки: HTTP {e.code}")
     for url in urls:
@@ -3432,7 +3457,7 @@ def pu_debs():
 def pu_check():
     """Скачивает latest.json и запоминает, есть ли версия новее. Ничего не устанавливает."""
     try:
-        with pu_open("latest.json") as r:
+        with pu_open("latest.json") as r:                  # всегда сначала основной источник (GitHub)
             m = json.loads(r.read(100000).decode("utf-8", "replace"))
         ver, fn, sha = str(m["version"]), str(m["file"]), str(m["sha256"]).lower()
         if not FILE_RE.match(fn) or not re.fullmatch(r"[0-9a-f]{64}", sha):
@@ -3443,7 +3468,7 @@ def pu_check():
                 v = str(e.get("version", ""))[:20]
                 if APP_VERSION != "dev" and _verkey(v) > _verkey(APP_VERSION):     # только то, чего у вас ещё нет
                     notes.append({"version": v, "changes": [str(c)[:300] for c in e["changes"][:15]]})
-        _pu["latest"] = {"version": ver, "file": fn, "sha256": sha, "notes": notes,
+        _pu["latest"] = {"version": ver, "file": fn, "sha256": sha, "notes": notes, "source": _pu.get("src", ""),
                          "newer": APP_VERSION != "dev" and _verkey(ver) > _verkey(APP_VERSION)}
         _pu["error"] = ""
     except (OSError, ValueError, KeyError, TypeError) as e:
@@ -3521,7 +3546,7 @@ def panelupdate_set(body: dict, user: str = Depends(auth)):
             try:
                 h = hashlib.sha256()
                 prog("panel", "Скачивание singbox-panel " + lt["version"], 0)
-                with pu_open(lt["file"]) as r, open(tmp, "wb") as f:
+                with pu_open(lt["file"], prefer=lt.get("source")) as r, open(tmp, "wb") as f:
                     _copy_progress(r, f, h, 50 * 1024 * 1024, (0, 85))
                 prog(stage="Проверка контрольной суммы и пакета", pct=90)
                 if h.hexdigest() != lt["sha256"]:
