@@ -1,3 +1,7 @@
+## 2.2.0
+- Operating system updates from the panel ("Settings → Updates → Operating system", Debian/Ubuntu): checking for available updates (apt-get update) with a package list and security updates marked, updating (upgrade or full-upgrade) as a separate background job with progress and a log, and a reboot button when the system asks for it. Everything only on buttons
+- The "sing-box update" tab is renamed to "Updates": it holds the panel, sing-box and the system
+
 ## 2.1.5
 - The changelog is now available in English too: in the panel's "What's new" (in the English interface) and in GitHub release notes
 

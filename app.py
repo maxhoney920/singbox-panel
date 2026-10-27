@@ -3446,7 +3446,7 @@ def reset_all(body: dict, user: str = Depends(auth)):
             log.append("бинарник и служба sing-box остались: их поставили не через панель (удалите пакетом: apt remove sing-box)")
         run(["systemctl", "daemon-reload"])
         _rm(CONFIG, log)
-        for d in (BACKUPS, BIN_BACKUPS, UPD_DIR, GW_DIR, STATE_FILE, TRAFFIC_FILE, PRESETS_FILE):
+        for d in (BACKUPS, BIN_BACKUPS, UPD_DIR, GW_DIR, STATE_FILE, TRAFFIC_FILE, PRESETS_FILE, OS_LOG):
             _rm(d, log)
         _traffic.update(loaded=False, since=0, rx=0, tx=0, last=None)
         _version["v"] = ""
@@ -3679,6 +3679,177 @@ def pu_start_install(path):
 @app.get("/api/panelupdate")
 def panelupdate_get(user: str = Depends(auth)):
     return _pu_view()
+
+
+# ------------------------------------------------- обновление операционной системы (apt), только по кнопкам
+OS_UNIT = "singbox-panel-os-upgrade"
+OS_LOG = os.path.join(DATA, "os-upgrade.log")
+OS_REBOOT_FLAG = "/var/run/reboot-required"
+_os = {"checked": 0, "pkgs": [], "held": [], "error": "", "full": False}
+_OS_INST = re.compile(r"^Inst (\S+) (?:\[([^\]]+)\] )?\((\S+) ([^)]*)\)")
+
+
+def os_release():
+    d = {}
+    try:
+        with open("/etc/os-release") as f:
+            for line in f:
+                k, _, v = line.strip().partition("=")
+                if k:
+                    d[k] = v.strip().strip('"')
+    except OSError:
+        pass
+    return d
+
+
+def os_parse_sim(out):
+    """Разбор `apt-get -s upgrade`: строки «Inst пакет [старая] (новая репозиторий [арх])» и «kept back»."""
+    pkgs, held, in_held = [], [], False
+    for line in out.splitlines():
+        m = _OS_INST.match(line)
+        if m:
+            name, old, new, rest = m.groups()
+            pkgs.append({"name": name, "old": old or "", "new": new, "security": "security" in rest.lower(),
+                         "repo": rest.split(" [")[0][:80]})
+        if line.startswith("The following packages have been kept back"):
+            in_held = True
+            continue
+        if in_held:
+            if line.startswith(" "):
+                held += line.split()
+            else:
+                in_held = False
+    return pkgs, held
+
+
+def os_simulate(full=False):
+    rc, out = run(["apt-get", "-s", "-o", "Debug::NoLocking=1", "dist-upgrade" if full else "upgrade"], timeout=180)
+    if rc != 0:
+        raise ValueError(out.strip()[-600:] or "apt-get -s завершился с ошибкой")
+    return os_parse_sim(out)
+
+
+def os_running():
+    if os.path.isfile(OS_LOG):
+        try:
+            with open(OS_LOG, errors="replace") as f:
+                tail = f.read()[-4000:]
+        except OSError:
+            tail = ""
+        if "\nEXIT " in "\n" + tail:
+            return False
+    p = _os.get("proc")
+    if p is not None and p.poll() is None:
+        return True
+    rc, out = run(["systemctl", "is-active", OS_UNIT])
+    return out.strip() in ("active", "activating")
+
+
+def os_log_state():
+    """Хвост журнала обновления, код выхода и прогресс (сколько пакетов уже настроено)."""
+    try:
+        with open(OS_LOG, errors="replace") as f:
+            text = f.read()
+    except OSError:
+        return {"log": "", "exit": None, "done": 0, "total": 0, "started": 0}
+    m = re.findall(r"^EXIT (\d+)$", text, re.M)
+    total = re.search(r"^(\d+) upgraded, (\d+) newly installed", text, re.M)
+    return {"log": "\n".join(text.splitlines()[-40:]), "exit": int(m[-1]) if m else None,
+            "done": len(re.findall(r"^Setting up ", text, re.M)),
+            "total": (int(total.group(1)) + int(total.group(2))) if total else 0,
+            "started": int(os.path.getmtime(OS_LOG))}
+
+
+def _os_view():
+    rel = os_release()
+    info = {"ok": True, "apt": bool(shutil.which("apt-get")), "name": rel.get("PRETTY_NAME") or platform.system(),
+            "kernel": platform.release(), "arch": platform.machine(),
+            "reboot": os.path.exists(OS_REBOOT_FLAG), "reboot_pkgs": [],
+            "checked": _os["checked"], "pkgs": _os["pkgs"], "held": _os["held"], "error": _os["error"], "full": _os["full"],
+            "running": os_running(), "job": os_log_state()}
+    try:
+        with open(OS_REBOOT_FLAG + ".pkgs") as f:
+            info["reboot_pkgs"] = sorted(set(f.read().split()))[:50]
+    except OSError:
+        pass
+    return info
+
+
+@app.get("/api/os")
+def os_get(user: str = Depends(auth)):
+    v = _os_view()
+    if v["apt"] and not _os["checked"] and not v["running"]:
+        try:                                    # по уже скачанным спискам пакетов, без сети
+            _os["pkgs"], _os["held"] = os_simulate(_os["full"])
+            v.update(pkgs=_os["pkgs"], held=_os["held"])
+        except ValueError:
+            pass
+    return v
+
+
+@app.post("/api/os")
+def os_set(body: dict, user: str = Depends(auth)):
+    act = body.get("action")
+    if not shutil.which("apt-get"):
+        return {"ok": False, "error": "Обновление системы поддерживается только для Debian/Ubuntu (apt-get не найден)"}
+    if act in ("check", "upgrade") and os_running():
+        return {"ok": False, "error": "Обновление системы уже выполняется"}
+    if act == "check":
+        _os["full"] = bool(body.get("full"))
+        prog("os", "apt-get update: обновление списков пакетов", 10)
+        rc, out = run(["apt-get", "update", "-q"], timeout=600)
+        _os["checked"] = int(time.time())
+        if rc != 0:
+            PROG["active"] = False
+            _os["error"] = "apt-get update: " + (out.strip()[-600:] or f"код {rc}")
+            return {**_os_view(), "ok": False, "error": _os["error"]}
+        prog(stage="Поиск доступных обновлений", pct=80)
+        try:
+            _os["pkgs"], _os["held"] = os_simulate(_os["full"])
+            _os["error"] = ""
+        except ValueError as e:
+            _os["error"] = str(e)
+        PROG["active"] = False
+        n, sec = len(_os["pkgs"]), sum(p["security"] for p in _os["pkgs"])
+        msg = f"Доступно обновлений: {n}" + (f", из них безопасности: {sec}" if sec else "") if n else "Система обновлена, обновлений нет"
+        return {**_os_view(), "ok": not _os["error"], "message": msg, "error": _os["error"]}
+    if act == "upgrade":
+        full = bool(body.get("full"))
+        os.makedirs(DATA, exist_ok=True)
+        apt = ("apt-get -y -q -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold "
+               + ("dist-upgrade" if full else "upgrade"))
+        script = (f"echo \"== $(date '+%F %T') apt-get update\"; apt-get update -q; "
+                  f"echo \"== $(date '+%F %T') {apt}\"; {apt}; rc=$?; echo \"EXIT $rc\"")
+        with open(OS_LOG, "w") as f:
+            f.write("")
+        os.chmod(OS_LOG, 0o600)
+        cmd = ["sh", "-c", f"({script}) >> {shlex.quote(OS_LOG)} 2>&1"]
+        env = ["DEBIAN_FRONTEND=noninteractive", "NEEDRESTART_MODE=a", "APT_LISTCHANGES_FRONTEND=none"]
+        if shutil.which("systemd-run") and "INVOCATION_ID" in os.environ:
+            run(["systemctl", "reset-failed", OS_UNIT])
+            rc, out = run(["systemd-run", "--no-block", f"--unit={OS_UNIT}", "--collect"]
+                          + [f"--setenv={e}" for e in env] + cmd)
+            if rc != 0:
+                return {"ok": False, "error": "Не удалось запустить обновление: " + out[-400:]}
+        else:
+            try:
+                _os["proc"] = subprocess.Popen(cmd, start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                               env={**os.environ, **dict(e.split("=", 1) for e in env)})
+            except OSError as e:
+                return {"ok": False, "error": f"Не удалось запустить обновление: {e}"}
+        _os["checked"] = 0
+        return {**_os_view(), "ok": True, "message": "Обновление системы запущено. Оно идёт в фоне и не прервётся, даже если панель перезапустится"}
+    if act == "reboot":
+        if os_running():
+            return {"ok": False, "error": "Дождитесь окончания обновления системы"}
+        if shutil.which("systemd-run"):
+            rc, out = run(["systemd-run", "--on-active=3", "--timer-property=AccuracySec=1s", "systemctl", "reboot"])
+        else:
+            rc, out = run(["shutdown", "-r", "+0"])
+        if rc != 0:
+            return {"ok": False, "error": "Не удалось перезагрузить: " + out[-300:]}
+        return {"ok": True, "message": "Устройство перезагружается. Панель снова откроется через минуту-две"}
+    raise HTTPException(400, "Недопустимое действие")
 
 
 @app.post("/api/panelupdate")
