@@ -47,6 +47,7 @@ canvas{width:100%;height:150px;display:block}
 .t.bad{background:#3b1a1a;border-color:#6e2a2a}
 #login{position:fixed;inset:0;background:var(--bg);display:none;align-items:center;justify-content:center;z-index:20}
 #login .card{width:320px}
+.langsel{font-size:12px;color:var(--mu);white-space:nowrap}.langsel select{padding:3px 6px;font-size:12px;margin-left:4px}
 .pbar{height:10px;background:var(--bg);border:1px solid var(--bd);border-radius:99px;overflow:hidden}
 .pbar>div{height:100%;background:var(--ac);border-radius:99px;transition:width .3s}
 .pbar.ind>div{width:30%!important;animation:pind 1.3s infinite linear}
@@ -75,7 +76,7 @@ tr.node{cursor:pointer}tr.node:hover{background:#1f2533}tr.node.act{background:#
   <div class="row"><input class="grow" id="lp" type="password" placeholder="Пароль" autocomplete="current-password" required></div>
   <div class="row"><button class="btn grow" type="submit">Войти</button></div>
   <div class="mu" id="lerr"></div>
-  <div style="text-align:center;margin-top:8px"><button type="button" class="btn sec langbtn" onclick="toggleLang()" style="padding:4px 10px;font-size:12px">EN</button></div>
+  <div style="text-align:center;margin-top:8px"><label class="langsel noi18n">🌐 Язык / Language <select onchange="setLang(this.value)"><option value="auto">Авто / Auto</option><option value="ru">Русский</option><option value="en">English</option></select></label></div>
   <div class="mu" style="text-align:center;font-size:12px;margin-top:10px">Сделано с любовью <a href="https://t.me/serv1897236bot" target="_blank" rel="noopener noreferrer" style="color:inherit"><b>safe-internet</b></a> <span style="color:#e25555">♥</span></div>
 </form></div>
 
@@ -91,7 +92,7 @@ tr.node{cursor:pointer}tr.node:hover{background:#1f2533}tr.node.act{background:#
     <button data-tab="help">Справка</button>
   </nav>
   <span class="mu" id="who"></span>
-  <button class="btn sec langbtn" onclick="toggleLang()" title="Язык интерфейса / Interface language">EN</button>
+  <label class="langsel noi18n">🌐 Язык / Language <select onchange="setLang(this.value)"><option value="auto">Авто / Auto</option><option value="ru">Русский</option><option value="en">English</option></select></label>
   <button class="btn sec" onclick="doLogout()">Выйти</button>
 </header>
 <div id="ver-banner" style="background:#3b1a1a;border-bottom:1px solid #6e2a2a;padding:10px 20px;display:none"></div>
@@ -621,11 +622,18 @@ tr.node{cursor:pointer}tr.node:hover{background:#1f2533}tr.node.act{background:#
    title/placeholder и confirm() проходят через словарь #i18n-en: фрагменты заменяются целиком,
    от длинных к коротким, только на границах русских слов. Чего нет в словаре, остаётся по-русски. */
 const CYR = /[А-Яа-яЁё]/;
-let LANG = 'ru';
-try { LANG = localStorage.getItem('sbp-lang') || (/^ru|^uk|^be|^kk/i.test(navigator.language || 'ru') ? 'ru' : 'en'); } catch (e) {}
+// выбор: auto (по языку браузера/системы), ru, en; LANG — язык, который в итоге показываем
+let LANG_PICK = 'auto';
+try { LANG_PICK = localStorage.getItem('sbp-lang') || 'auto'; } catch (e) {}
+if (!['auto', 'ru', 'en'].includes(LANG_PICK)) LANG_PICK = 'auto';
+const LANG_AUTO = ((navigator.languages && navigator.languages[0]) || navigator.language || 'ru').toLowerCase();
+const LANG = LANG_PICK !== 'auto' ? LANG_PICK : (/^(ru|uk|be|kk)/.test(LANG_AUTO) ? 'ru' : 'en');
 const I18N = {re: null, d: null};
 function i18nInit() {
-  document.querySelectorAll('.langbtn').forEach(b => b.textContent = LANG === 'en' ? 'RU' : 'EN');
+  document.querySelectorAll('.langsel select').forEach(s => {
+    s.value = LANG_PICK;
+    s.options[0].textContent = 'Авто / Auto (' + (LANG === 'ru' ? 'Русский' : 'English') + ')';
+  });
   if (LANG !== 'en') return;
   try { I18N.d = JSON.parse(document.getElementById('i18n-en').textContent); } catch (e) { return; }
   const keys = Object.keys(I18N.d).sort((a, b) => b.length - a.length);
@@ -669,8 +677,8 @@ function trNode(root) {
     else ['title', 'placeholder', 'label'].forEach(a => trAttr(n, a));
   }
 }
-function toggleLang() {
-  try { localStorage.setItem('sbp-lang', LANG === 'en' ? 'ru' : 'en'); } catch (e) {}
+function setLang(v) {
+  try { localStorage.setItem('sbp-lang', v); } catch (e) {}
   location.reload();
 }
 i18nInit();
