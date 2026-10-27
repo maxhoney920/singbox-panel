@@ -1424,7 +1424,7 @@ async function loadPU() {
 }
 function accVersions(title, sub, list, open, cur) {
   return `<details class="acc"${open ? ' open' : ''}><summary><span class="acc-t">${esc(title)}</span>${sub ? `<span class="acc-s">${esc(sub)}</span>` : ''}</summary><div class="acc-b">`
-    + list.map((n, i) => `<div class="ver-e"><span class="vtag${cur && n.version === cur ? ' cur' : ''}">v${esc(n.version)}</span>${cur && n.version === cur ? ' <span class="mu" style="font-size:12px">установлена</span>' : ''}<ul>${(n.changes || []).map(c => `<li>${esc(c)}</li>`).join('')}</ul></div>`).join('')
+    + list.map((n, i) => `<div class="ver-e"><span class="vtag${cur && n.version === cur ? ' cur' : ''}">v${esc(n.version)}</span>${cur && n.version === cur ? ' <span class="mu" style="font-size:12px">установлена</span>' : ''}<ul>${((LANG === 'en' && (n.changes_en || []).length ? n.changes_en : n.changes) || []).map(c => `<li>${esc(c)}</li>`).join('')}</ul></div>`).join('')
     + '</div></details>';
 }
 function renderPU() {

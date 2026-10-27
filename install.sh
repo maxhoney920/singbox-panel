@@ -95,7 +95,7 @@ apt-get install -y -qq python3 libpam0g iproute2 >/dev/null
 step "Копирую файлы в $INSTALL_DIR"
 install -d -m 755 "$INSTALL_DIR"
 install -m 644 "$SRC/app.py" "$SRC/index.html" "$INSTALL_DIR/"
-[ -f "$SRC/CHANGELOG.md" ] && install -m 644 "$SRC/CHANGELOG.md" "$INSTALL_DIR/"
+for f in CHANGELOG.md CHANGELOG.en.md; do [ -f "$SRC/$f" ] && install -m 644 "$SRC/$f" "$INSTALL_DIR/"; done
 
 # файл настроек
 step "Настройки $ENV_FILE"

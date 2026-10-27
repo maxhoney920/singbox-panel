@@ -40,7 +40,7 @@ sudo bash singbox-panel-installer.sh
 ./make-bundle.sh         # singbox-panel-installer.sh (версия берётся из latest.json)
 ```
 
-Нужны `dpkg-deb` и `python3`. Изменения описываются в `CHANGELOG.md` (раздел `## X.Y.Z`) — из него собирается список «Что нового».
+Нужны `dpkg-deb` и `python3`. Изменения описываются в `CHANGELOG.md` и по-английски в `CHANGELOG.en.md` (разделы `## X.Y.Z` с одинаковыми версиями) — из них собирается «Что нового» в панели и описание релиза на GitHub.
 
 ## Готовые наборы маршрутизации
 
@@ -54,6 +54,7 @@ sudo bash singbox-panel-installer.sh
 |---|---|
 | `app.py` | сервер панели (HTTP, PAM, systemd, sing-box, подписки, шлюз…) |
 | `index.html` | интерфейс (включая словарь английского перевода) |
+| `CHANGELOG.md`, `CHANGELOG.en.md` | список изменений на русском и английском |
 | `presets.json` | готовые наборы маршрутизации (обновляются без обновления панели) |
 | `.github/workflows/release.yml` | сборка пакета и релиз на GitHub при новой версии в `CHANGELOG.md` |
 | `deb/` | файлы пакета: control, postinst/prerm/postrm, PAM-служба, настройки по умолчанию |

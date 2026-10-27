@@ -32,7 +32,7 @@
         src: "{{ item }}"
         dest: "{{ panel_dir }}/{{ item }}"
         mode: "0644"
-      loop: [app.py, index.html, CHANGELOG.md]
+      loop: [app.py, index.html, CHANGELOG.md, CHANGELOG.en.md]
       notify: restart panel
 
     - name: Файл настроек

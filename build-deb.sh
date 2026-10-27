@@ -22,6 +22,7 @@ install -d -m755 "$R/DEBIAN" "$R/usr/bin" "$R/usr/lib/singbox-panel" "$R/lib/sys
 sed "s|^APP_VERSION = \"dev\"|APP_VERSION = \"$VERSION\"|" app.py > "$R/usr/lib/singbox-panel/app.py"
 sed "s|<meta name=\"panel-version\" content=\"dev\">|<meta name=\"panel-version\" content=\"$VERSION\">|" index.html > "$R/usr/lib/singbox-panel/index.html"
 install -m644 CHANGELOG.md "$R/usr/lib/singbox-panel/CHANGELOG.md"
+[ -f CHANGELOG.en.md ] && install -m644 CHANGELOG.en.md "$R/usr/lib/singbox-panel/CHANGELOG.en.md"
 chmod 644 "$R/usr/lib/singbox-panel/app.py" "$R/usr/lib/singbox-panel/index.html"
 grep -q "APP_VERSION = \"$VERSION\"" "$R/usr/lib/singbox-panel/app.py" && grep -q "content=\"$VERSION\"" "$R/usr/lib/singbox-panel/index.html" || { echo "не удалось проставить версию"; exit 1; }
 install -m755 deb/singbox-panel "$R/usr/bin/singbox-panel"
@@ -54,16 +55,28 @@ SUM=$(sha256sum "$OUT" | cut -d' ' -f1)
 python3 - "$VERSION" "$(basename "$OUT")" "$SUM" <<'PY'
 import json, re, sys
 ver, fn, sha = sys.argv[1:4]
-log, cur = [], None
-for line in open("CHANGELOG.md", encoding="utf-8"):
-    m = re.match(r"^##\s+(\S+)", line)
-    if m:
-        cur = {"version": m.group(1), "changes": []}
-        log.append(cur)
-    elif cur is not None and line.startswith("- "):
-        cur["changes"].append(line[2:].strip())
+def parse(fn):
+    log, cur = [], None
+    try:
+        lines = open(fn, encoding="utf-8").readlines()
+    except OSError:
+        return log
+    for line in lines:
+        m = re.match(r"^##\s+(\S+)", line)
+        if m:
+            cur = {"version": m.group(1), "changes": []}
+            log.append(cur)
+        elif cur is not None and line.startswith("- "):
+            cur["changes"].append(line[2:].strip())
+    return log
+log, en = parse("CHANGELOG.md"), {x["version"]: x["changes"] for x in parse("CHANGELOG.en.md")}
+for x in log:
+    if en.get(x["version"]):
+        x["changes_en"] = en[x["version"]]
 if not any(x["version"] == ver and x["changes"] for x in log):
     print("ВНИМАНИЕ: в CHANGELOG.md нет записи для версии " + ver, file=sys.stderr)
+if not en.get(ver):
+    print("ВНИМАНИЕ: в CHANGELOG.en.md нет записи для версии " + ver, file=sys.stderr)
 json.dump({"version": ver, "file": fn, "sha256": sha, "changelog": log[:20]}, open("latest.json", "w", encoding="utf-8"), ensure_ascii=False, indent=2)
 open("latest.json", "a").write("\n")
 PY

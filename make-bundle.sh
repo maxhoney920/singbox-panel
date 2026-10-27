@@ -22,8 +22,8 @@ W="$(mktemp -d)"; trap 'rm -rf "$W"' EXIT
 sed "s|^APP_VERSION = \"dev\"|APP_VERSION = \"$VERSION\"|" app.py > "$W/app.py"
 sed "s|<meta name=\"panel-version\" content=\"dev\">|<meta name=\"panel-version\" content=\"$VERSION\">|" index.html > "$W/index.html"
 cp install.sh "$W/install.sh"
-cp CHANGELOG.md "$W/CHANGELOG.md"
+cp CHANGELOG.md CHANGELOG.en.md "$W/"
 grep -q "APP_VERSION = \"$VERSION\"" "$W/app.py" && grep -q "content=\"$VERSION\"" "$W/index.html" || { echo "не удалось проставить версию"; exit 1; }
-tar czf - -C "$W" app.py index.html install.sh CHANGELOG.md | base64 >> "$OUT"
+tar czf - -C "$W" app.py index.html install.sh CHANGELOG.md CHANGELOG.en.md | base64 >> "$OUT"
 chmod +x "$OUT"
 echo "Готово: $OUT ($(du -h "$OUT" | cut -f1))"

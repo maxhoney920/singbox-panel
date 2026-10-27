@@ -3583,7 +3583,10 @@ def pu_check():
             if isinstance(e, dict) and isinstance(e.get("changes"), list):
                 v = str(e.get("version", ""))[:20]
                 if APP_VERSION != "dev" and _verkey(v) > _verkey(APP_VERSION):     # только то, чего у вас ещё нет
-                    notes.append({"version": v, "changes": [str(c)[:300] for c in e["changes"][:15]]})
+                    n = {"version": v, "changes": [str(c)[:300] for c in e["changes"][:15]]}
+                    if isinstance(e.get("changes_en"), list):
+                        n["changes_en"] = [str(c)[:300] for c in e["changes_en"][:15]]
+                    notes.append(n)
         _pu["latest"] = {"version": ver, "file": fn, "sha256": sha, "notes": notes, "source": _pu.get("src", ""),
                          "newer": APP_VERSION != "dev" and _verkey(ver) > _verkey(APP_VERSION)}
         _pu["error"] = ""
@@ -3619,23 +3622,35 @@ def pu_loop():
 _cl = {"m": None, "data": []}
 
 
+def _parse_changelog(p):
+    out, cur = [], None
+    with open(p, encoding="utf-8") as f:
+        for line in f:
+            line = line.rstrip()
+            if line.startswith("## "):
+                cur = {"version": line[3:].strip()[:20], "changes": []}
+                out.append(cur)
+            elif cur is not None and line.startswith("- "):
+                cur["changes"].append(line[2:].strip()[:400])
+    return out
+
+
 def local_changelog():
-    """Список изменений установленной панели — из CHANGELOG.md, который ставится рядом с app.py."""
-    p = os.path.join(BASE_DIR, "CHANGELOG.md")
+    """Список изменений установленной панели — из CHANGELOG.md (и английского CHANGELOG.en.md) рядом с app.py."""
+    p, pe = os.path.join(BASE_DIR, "CHANGELOG.md"), os.path.join(BASE_DIR, "CHANGELOG.en.md")
     try:
-        mt = os.path.getmtime(p)
+        mt = (os.path.getmtime(p), os.path.getmtime(pe) if os.path.isfile(pe) else 0)
     except OSError:
         return []
     if _cl["m"] != mt:
-        out, cur = [], None
-        with open(p, encoding="utf-8") as f:
-            for line in f:
-                line = line.rstrip()
-                if line.startswith("## "):
-                    cur = {"version": line[3:].strip()[:20], "changes": []}
-                    out.append(cur)
-                elif cur is not None and line.startswith("- "):
-                    cur["changes"].append(line[2:].strip()[:400])
+        out = _parse_changelog(p)
+        try:
+            en = {e["version"]: e["changes"] for e in _parse_changelog(pe)}
+        except OSError:
+            en = {}
+        for e in out:
+            if en.get(e["version"]):
+                e["changes_en"] = en[e["version"]]
         _cl.update(m=mt, data=out)
     return _cl["data"]
 
