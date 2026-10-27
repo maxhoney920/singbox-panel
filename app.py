@@ -1460,11 +1460,13 @@ def _startup():
         b = service_binary()
         if b:
             BINARY = b
+    presets_load_cache()                       # списки наборов, скачанные с GitHub раньше
     threading.Thread(target=auto_loop, daemon=True).start()
     threading.Thread(target=watch_code, daemon=True).start()
     threading.Thread(target=pu_loop, daemon=True).start()
     threading.Thread(target=fo_loop, daemon=True).start()
     threading.Thread(target=traffic_loop, daemon=True).start()
+    threading.Thread(target=presets_loop, daemon=True).start()
     threading.Thread(target=lambda: (time.sleep(5), migrate_presets(auto=True)), daemon=True).start()
 
 
@@ -1491,6 +1493,113 @@ PRESETS = {
 }
 # прежние версии списков: {id набора: {поле: [[старый список], …]}}. Правило с таким списком при обновлении получит новый.
 PRESET_HISTORY = {}
+PRESET_BUILTIN_REV = PRESET_REV          # наборы, вшитые в эту версию панели
+
+# Свежие списки наборов лежат в репозитории (presets.json) и скачиваются отдельно от панели — раз в сутки и по кнопке.
+# Скачивание только обновляет списки в панели; в конфиг они попадают по кнопке «Обновить списки наборов».
+PRESETS_URL = "https://raw.githubusercontent.com/maxhoney920/singbox-panel/main/presets.json"
+PRESETS_FILE = os.path.join(DATA, "presets.json")
+PRESETS_EVERY = 24 * 3600
+PRESET_FIELDS = ("domain_suffix", "domain", "domain_keyword", "ip_cidr")
+_presets = {"source": "встроенные", "checked": 0, "error": ""}
+
+
+def presets_validate(d):
+    """Проверяет присланные наборы: только простые правила по доменам/подсетям, разумные размеры."""
+    if not isinstance(d, dict) or not isinstance(d.get("rev"), int) or not isinstance(d.get("presets"), dict):
+        raise ValueError("нет полей rev/presets")
+    out, hist = {}, {}
+    for pid, P in d["presets"].items():
+        if not re.fullmatch(r"[a-z0-9_-]{1,32}", str(pid)) or not isinstance(P, dict):
+            raise ValueError(f"неверный id набора {pid!r}")
+        t, d_ = str(P.get("t", ""))[:100], P.get("d")
+        if not t or d_ not in ("direct", "proxy") or not isinstance(P.get("r"), list) or not 0 < len(P["r"]) <= 10:
+            raise ValueError(f"набор {pid}: нужны t, d (direct/proxy) и r")
+        rules = []
+        for r in P["r"]:
+            if not isinstance(r, dict) or len(r) != 1 or next(iter(r)) not in PRESET_FIELDS:
+                raise ValueError(f"набор {pid}: правило должно содержать одно поле из {', '.join(PRESET_FIELDS)}")
+            f, vals = next(iter(r.items()))
+            if not isinstance(vals, list) or not 0 < len(vals) <= 2000 or not all(isinstance(v, str) and 0 < len(v) <= 253 for v in vals):
+                raise ValueError(f"набор {pid}: неверный список {f}")
+            rules.append({f: list(vals)})
+        out[pid] = {"t": t, "d": d_, "r": rules}
+        if P.get("t_en"):
+            out[pid]["t_en"] = str(P["t_en"])[:100]
+    for pid, H in (d.get("history") or {}).items():
+        if pid in out and isinstance(H, dict):
+            hist[pid] = {f: [list(map(str, l)) for l in ls if isinstance(l, list)] for f, ls in H.items()
+                         if f in PRESET_FIELDS and isinstance(ls, list)}
+    return d["rev"], out, hist
+
+
+def presets_apply(rev, presets, hist, source):
+    """Заменяет списки наборов в памяти. Прежние списки попадают в историю, чтобы правила из них узнавались."""
+    global PRESETS, PRESET_HISTORY, PRESET_REV
+    merged = {pid: {f: [list(l) for l in ls] for f, ls in H.items()} for pid, H in PRESET_HISTORY.items()}
+    for pid, H in hist.items():
+        for f, ls in H.items():
+            dst = merged.setdefault(pid, {}).setdefault(f, [])
+            dst += [l for l in ls if sorted(l) not in [sorted(x) for x in dst]]
+    for pid, P in PRESETS.items():                 # старые списки этой панели → в историю
+        for pr in P["r"]:
+            f = next(iter(pr))
+            new = next((q[f] for q in (presets.get(pid) or {}).get("r", []) if f in q), None)
+            if new is not None and sorted(new) != sorted(pr[f]):
+                dst = merged.setdefault(pid, {}).setdefault(f, [])
+                if sorted(pr[f]) not in [sorted(x) for x in dst]:
+                    dst.append(list(pr[f]))
+    PRESETS, PRESET_HISTORY, PRESET_REV = presets, merged, rev
+    _presets["source"] = source
+
+
+def presets_load_cache():
+    try:
+        with open(PRESETS_FILE) as f:
+            rev, p, h = presets_validate(json.load(f))
+    except (OSError, ValueError, TypeError):
+        return
+    if rev > PRESET_REV:
+        presets_apply(rev, p, h, "GitHub (сохранённые)")
+
+
+def presets_fetch():
+    """Скачивает presets.json с GitHub; если там версия новее — обновляет списки в панели (конфиг не трогает)."""
+    op = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    op.addheaders = [("User-Agent", "singbox-panel/" + APP_VERSION)]
+    _presets["checked"] = int(time.time())
+    try:
+        with op.open(PRESETS_URL, timeout=30) as r:
+            raw = r.read(2_000_001)
+        if len(raw) > 2_000_000:
+            raise ValueError("файл больше 2 МБ")
+        rev, p, h = presets_validate(json.loads(raw.decode("utf-8")))
+    except (OSError, ValueError, TypeError) as e:
+        _presets["error"] = f"Не удалось получить наборы с GitHub: {e}"
+        return {"ok": False, "error": _presets["error"]}
+    _presets["error"] = ""
+    if rev <= PRESET_REV:
+        return {"ok": True, "updated": False, "message": f"Списки наборов актуальны (версия {PRESET_REV})"}
+    with LOCK:
+        presets_apply(rev, p, h, "GitHub")
+        try:
+            os.makedirs(DATA, exist_ok=True)
+            _write_bytes(PRESETS_FILE, raw)
+        except OSError:
+            pass
+    return {"ok": True, "updated": True, "message": f"Загружены списки наборов версии {rev}. "
+            "Если в конфиге есть правила из прежних списков, нажмите «Обновить списки наборов»"}
+
+
+def presets_loop():
+    time.sleep(random.randint(60, 600))
+    while True:
+        if time.time() - _presets["checked"] >= PRESETS_EVERY:
+            try:
+                presets_fetch()
+            except Exception:
+                traceback.print_exc()
+        time.sleep(3600)
 
 
 def _preset_rule_field(rule):
@@ -1515,7 +1624,7 @@ def migrate_presets(auto=False):
     """Обновляет в конфиге правила, созданные из готовых наборов прежних версий панели (направление сохраняется)."""
     with LOCK:
         st = load_state()
-        if auto and st.get("preset_rev", 0) >= PRESET_REV:
+        if auto and st.get("preset_rev", 0) >= PRESET_BUILTIN_REV:     # сами — только после обновления панели
             return {"ok": True, "message": "Наборы уже актуальны", "changed": 0}
         try:
             cfg = _cfg_read()
@@ -1536,7 +1645,7 @@ def migrate_presets(auto=False):
             if res.get("ok"):
                 res["message"] = f"Обновлено правил из наборов: {n}. " + res.get("message", "")
         if res.get("ok"):
-            st["preset_rev"] = PRESET_REV
+            st["preset_rev"] = PRESET_BUILTIN_REV
             save_state(st)
         return res
 
@@ -1577,7 +1686,12 @@ def p2p_toggle(body: dict, user: str = Depends(auth)):
 
 @app.get("/api/presets")
 def presets_list(user: str = Depends(auth)):
-    return {"ok": True, "presets": PRESETS, "history": PRESET_HISTORY}
+    return {"ok": True, "presets": PRESETS, "history": PRESET_HISTORY, "rev": PRESET_REV, **_presets}
+
+
+@app.post("/api/presets/fetch")
+def presets_fetch_api(body: dict, user: str = Depends(auth)):
+    return {**presets_fetch(), "rev": PRESET_REV, **{k: v for k, v in _presets.items() if k != "error"}}
 
 
 @app.post("/api/presets/add")
@@ -3330,7 +3444,7 @@ def reset_all(body: dict, user: str = Depends(auth)):
             log.append("бинарник и служба sing-box остались: их поставили не через панель (удалите пакетом: apt remove sing-box)")
         run(["systemctl", "daemon-reload"])
         _rm(CONFIG, log)
-        for d in (BACKUPS, BIN_BACKUPS, UPD_DIR, GW_DIR, STATE_FILE, TRAFFIC_FILE):
+        for d in (BACKUPS, BIN_BACKUPS, UPD_DIR, GW_DIR, STATE_FILE, TRAFFIC_FILE, PRESETS_FILE):
             _rm(d, log)
         _traffic.update(loaded=False, since=0, rx=0, tx=0, last=None)
         _version["v"] = ""

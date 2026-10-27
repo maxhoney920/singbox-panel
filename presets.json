@@ -1,0 +1,179 @@
+{
+  "_doc": "Готовые наборы маршрутизации singbox-panel. После правки увеличьте rev; прежние списки, которые меняете, перенесите в history[id][поле] — так панель узнает и обновит правила, созданные из них.",
+  "rev": 1,
+  "presets": {
+    "lan": {
+      "t": "Локальные адреса (192.168.x.x, 10.x.x.x…)",
+      "t_en": "Local addresses (192.168.x.x, 10.x.x.x…)",
+      "d": "direct",
+      "r": [
+        {
+          "ip_cidr": [
+            "10.0.0.0/8",
+            "172.16.0.0/12",
+            "192.168.0.0/16",
+            "127.0.0.0/8"
+          ]
+        }
+      ]
+    },
+    "ru": {
+      "t": "Российские домены (.ru, .su, .рф)",
+      "t_en": "Russian domains (.ru, .su, .рф)",
+      "d": "direct",
+      "r": [
+        {
+          "domain_suffix": [
+            "ru",
+            "su",
+            "xn--p1ai"
+          ]
+        }
+      ]
+    },
+    "youtube": {
+      "t": "YouTube",
+      "t_en": "YouTube",
+      "d": "proxy",
+      "r": [
+        {
+          "domain_suffix": [
+            "youtube.com",
+            "youtu.be",
+            "googlevideo.com",
+            "ytimg.com",
+            "ggpht.com",
+            "youtube-nocookie.com",
+            "youtubei.googleapis.com"
+          ]
+        }
+      ]
+    },
+    "telegram": {
+      "t": "Telegram",
+      "t_en": "Telegram",
+      "d": "proxy",
+      "r": [
+        {
+          "domain_suffix": [
+            "telegram.org",
+            "t.me",
+            "telegram.me",
+            "telegra.ph",
+            "tdesktop.com",
+            "telesco.pe",
+            "cdn-telegram.org"
+          ]
+        },
+        {
+          "ip_cidr": [
+            "91.108.4.0/22",
+            "91.108.8.0/22",
+            "91.108.12.0/22",
+            "91.108.16.0/22",
+            "91.108.56.0/22",
+            "149.154.160.0/20",
+            "185.76.151.0/24"
+          ]
+        }
+      ]
+    },
+    "ai": {
+      "t": "ChatGPT / OpenAI / Claude",
+      "t_en": "ChatGPT / OpenAI / Claude",
+      "d": "proxy",
+      "r": [
+        {
+          "domain_suffix": [
+            "openai.com",
+            "chatgpt.com",
+            "oaistatic.com",
+            "oaiusercontent.com",
+            "anthropic.com",
+            "claude.ai"
+          ]
+        }
+      ]
+    },
+    "discord": {
+      "t": "Discord",
+      "t_en": "Discord",
+      "d": "proxy",
+      "r": [
+        {
+          "domain_suffix": [
+            "discord.com",
+            "discord.gg",
+            "discordapp.com",
+            "discordapp.net",
+            "discord.media"
+          ]
+        }
+      ]
+    },
+    "meta": {
+      "t": "Instagram / Facebook / WhatsApp / Threads",
+      "t_en": "Instagram / Facebook / WhatsApp / Threads",
+      "d": "proxy",
+      "r": [
+        {
+          "domain_suffix": [
+            "instagram.com",
+            "cdninstagram.com",
+            "facebook.com",
+            "fbcdn.net",
+            "whatsapp.com",
+            "whatsapp.net",
+            "threads.net"
+          ]
+        }
+      ]
+    },
+    "twitter": {
+      "t": "X (Twitter)",
+      "t_en": "X (Twitter)",
+      "d": "proxy",
+      "r": [
+        {
+          "domain_suffix": [
+            "twitter.com",
+            "x.com",
+            "twimg.com",
+            "t.co"
+          ]
+        }
+      ]
+    },
+    "netflix": {
+      "t": "Netflix",
+      "t_en": "Netflix",
+      "d": "proxy",
+      "r": [
+        {
+          "domain_suffix": [
+            "netflix.com",
+            "nflxvideo.net",
+            "nflximg.net",
+            "nflxext.com",
+            "nflxso.net"
+          ]
+        }
+      ]
+    },
+    "spotify": {
+      "t": "Spotify",
+      "t_en": "Spotify",
+      "d": "proxy",
+      "r": [
+        {
+          "domain_suffix": [
+            "spotify.com",
+            "scdn.co",
+            "spotifycdn.com"
+          ]
+        }
+      ]
+    }
+  },
+  "history": {}
+}
