@@ -1467,6 +1467,7 @@ def _startup():
     threading.Thread(target=fo_loop, daemon=True).start()
     threading.Thread(target=traffic_loop, daemon=True).start()
     threading.Thread(target=presets_loop, daemon=True).start()
+    threading.Thread(target=badge_loop, daemon=True).start()
     threading.Thread(target=lambda: (time.sleep(5), migrate_presets(auto=True)), daemon=True).start()
 
 
@@ -3653,6 +3654,69 @@ def pu_loop():
         time.sleep(max(60, PU_INTERVAL - (time.time() - _pu["checked"])))
 
 
+# ------------------------------------------------- счётчики обновлений на пунктах меню (без отдельных уведомлений)
+BADGE_SB_EVERY = 2 * 3600          # новые версии sing-box на GitHub
+BADGE_OS_EVERY = 30 * 60           # пакеты ОС — по уже скачанным спискам, без сети
+_badge = {"sb_t": 0.0, "sb_latest": "", "os_t": 0.0, "os_n": 0, "os_sec": 0}
+
+
+def badge_refresh(force_os=False):
+    now = time.time()
+    if now - _badge["sb_t"] >= BADGE_SB_EVERY:
+        _badge["sb_t"] = now
+        try:
+            stable = [r for r in get_releases(True) if not r["prerelease"]]
+            _badge["sb_latest"] = stable[0]["tag"] if stable else ""
+        except Exception:
+            pass
+    if (force_os or now - _badge["os_t"] >= BADGE_OS_EVERY) and shutil.which("apt-get") and not os_running():
+        _badge["os_t"] = now
+        try:
+            pkgs, _ = os_simulate(False)
+            _badge["os_n"], _badge["os_sec"] = len(pkgs), sum(p["security"] for p in pkgs)
+        except Exception:
+            pass
+
+
+def badge_loop():
+    time.sleep(random.randint(20, 120))
+    while True:
+        try:
+            badge_refresh()
+        except Exception:
+            traceback.print_exc()
+        time.sleep(600)
+
+
+def badges():
+    out = {}
+    job = os_log_state()
+    if job["exit"] is not None and job["started"] > _badge["os_t"]:    # обновление ОС закончилось — пересчитать
+        badge_refresh(force_os=True)
+    lt = pu_fresh(_pu["latest"])
+    if lt and lt.get("newer"):
+        out["panel"] = lt["version"]
+    cur, new = parse_ver(sb_version()), parse_ver(_badge["sb_latest"])
+    if cur and new and new > cur:
+        out["singbox"] = _badge["sb_latest"]
+    if _badge["os_n"]:
+        out["os"] = _badge["os_n"]
+        out["os_security"] = _badge["os_sec"]
+    try:
+        old = [r for r in (_cfg_read().get("route") or {}).get("rules", []) or [] if (preset_label(r) or (0, 0, True))[2] is False]
+        if old:
+            out["presets"] = len(old)
+    except (OSError, ValueError, AttributeError):
+        pass
+    out["updates"] = int("panel" in out) + int("singbox" in out) + out.get("os", 0)
+    return out
+
+
+@app.get("/api/badges")
+def badges_get(user: str = Depends(auth)):
+    return {"ok": True, **badges()}
+
+
 _cl = {"m": None, "data": []}
 
 
@@ -3844,6 +3908,7 @@ def os_set(body: dict, user: str = Depends(auth)):
         except ValueError as e:
             _os["error"] = str(e)
         PROG["active"] = False
+        _badge.update(os_t=time.time(), os_n=len(_os["pkgs"]), os_sec=sum(p["security"] for p in _os["pkgs"]))
         n, sec = len(_os["pkgs"]), sum(p["security"] for p in _os["pkgs"])
         msg = f"Доступно обновлений: {n}" + (f", из них безопасности: {sec}" if sec else "") if n else "Система обновлена, обновлений нет"
         return {**_os_view(), "ok": not _os["error"], "message": msg, "error": _os["error"]}

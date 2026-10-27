@@ -1,3 +1,6 @@
+## 2.2.2
+- Update counters on menu items: "Settings" and "Updates" show how many updates are available (panel, sing-box, system packages; red if there is a panel or security update), "Routing" shows how many rules come from outdated preset lists. Details are in the tooltip. No other notifications
+
 ## 2.2.1
 - sing-box update: the "Install" button is active right away — it downloads and checks the selected version by itself (before, it stayed disabled until "Download and check" was pressed)
 - sing-box from an apt package: the package can be pinned (apt-mark hold) — with a checkbox during installation or the "Pin now" button, so apt upgrade does not bring back the repository version; the pin is removed with a button
