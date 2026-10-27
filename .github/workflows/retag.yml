@@ -1,0 +1,27 @@
+# Ручной запуск (Actions → retag → Run workflow): переносит теги vX.Y.Z на коммиты ветки main с тем же заголовком.
+# Нужен после переписывания истории main: старые теги указывают на коммиты, которых в main больше нет.
+name: retag
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  retag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Перенос тегов
+        run: |
+          git fetch --force --tags origin
+          git log origin/main --format='%H%x09%s' > main.txt
+          for t in $(git tag -l 'v*'); do
+            old=$(git rev-parse "$t^{commit}")
+            if git merge-base --is-ancestor "$old" origin/main; then echo "$t: уже в main"; continue; fi
+            subj=$(git log -1 --format=%s "$old")
+            new=$(awk -F'\t' -v s="$subj" '$2==s {print $1; exit}' main.txt)
+            if [ -z "$new" ]; then echo "$t: нет коммита «$subj» в main — пропуск"; continue; fi
+            if [ "$(git rev-parse "$old^{tree}")" != "$(git rev-parse "$new^{tree}")" ]; then echo "$t: содержимое отличается — пропуск"; continue; fi
+            git tag -f "$t" "$new" && git push --force origin "refs/tags/$t" && echo "$t: $old → $new"
+          done
