@@ -28,8 +28,16 @@ jobs:
           VER="${{ steps.ver.outputs.ver }}"
           ./build-deb.sh "$VER"
           ./make-bundle.sh "$VER"
-          awk -v v="## $VER" '$0==v{f=1;next} /^## /{f=0} f' CHANGELOG.md > notes.md
-          printf '\n**Установка:** `sudo apt install ./singbox-panel_%s_all.deb` или `sudo bash singbox-panel-installer.sh`.\n`latest.json` — файл для самообновления панели.\n' "$VER" >> notes.md
+          sec() { awk -v v="## $VER" '$0==v{f=1;next} /^## /{f=0} f' "$1"; }
+          {
+            sec CHANGELOG.md
+            printf '\n**Установка:** `sudo apt install ./singbox-panel_%s_all.deb` или `sudo bash singbox-panel-installer.sh`.\n`latest.json` — файл для самообновления панели.\n' "$VER"
+            if [ -f CHANGELOG.en.md ] && [ -n "$(sec CHANGELOG.en.md)" ]; then
+              printf '\n---\n\n**English**\n\n'
+              sec CHANGELOG.en.md
+              printf '\n**Install:** `sudo apt install ./singbox-panel_%s_all.deb` or `sudo bash singbox-panel-installer.sh`.\n`latest.json` is used by the panel self-update.\n' "$VER"
+            fi
+          } > notes.md
       - uses: softprops/action-gh-release@v2
         if: steps.ver.outputs.skip != '1'
         with:
