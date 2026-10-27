@@ -2861,7 +2861,8 @@ def update_info(refresh: int = 0, user: str = Depends(auth)):
     except (OSError, ValueError) as e:        # URLError — подкласс OSError
         err = f"Список релизов не получен (GitHub недоступен с сервера?): {e}"
     target = service_binary()
-    pkg = bool(target and shutil.which("dpkg") and run(["dpkg", "-S", os.path.realpath(target)])[0] == 0)
+    pkg_name = dpkg_owner(target)
+    pkg = bool(pkg_name)
     backups = []
     if os.path.isdir(BIN_BACKUPS):
         names = [n for n in os.listdir(BIN_BACKUPS) if not n.endswith(".config.json")]
@@ -2869,7 +2870,8 @@ def update_info(refresh: int = 0, user: str = Depends(auth)):
             p = os.path.join(BIN_BACKUPS, n)
             backups.append({"name": n, "size": os.path.getsize(p), "has_config": os.path.isfile(p + ".config.json"),
                             "time": datetime.fromtimestamp(os.path.getmtime(p)).strftime("%Y-%m-%d %H:%M")})
-    return {"ok": True, "version": raw, "binary": target, "arch": platform.machine(), "dpkg": pkg,
+    return {"ok": True, "version": raw, "binary": target, "arch": platform.machine(), "dpkg": pkg, "pkg_name": pkg_name,
+            "held": bool(pkg_name) and pkg_name in run(["apt-mark", "showhold"])[1].split(),
             "fresh": not target, "no_config": not os.path.isfile(CONFIG), "no_unit": not unit_exists(),
             "releases": rels, "error": err, "backups": backups}
 
@@ -2988,10 +2990,42 @@ def update_install(body: dict, user: str = Depends(auth)):
                 res["message"] += ".\n\n" + "\n".join("ℹ " + n for n in notes)
         if res["ok"]:
             shutil.rmtree(UPD_DIR, ignore_errors=True)
+            pkg_name = dpkg_owner(service_binary())
+            if pkg_name and body.get("hold") and shutil.which("apt-mark"):
+                rc, out = run(["apt-mark", "hold", pkg_name])
+                res["message"] += (f". Пакет {pkg_name} закреплён (apt-mark hold): apt upgrade не вернёт старую версию" if rc == 0
+                                   else f". Не удалось закрепить пакет {pkg_name}: {out.strip()[-200:]}")
         return res
     finally:
         PROG["active"] = False
         UPDATE_LOCK.release()
+
+
+def dpkg_owner(path):
+    """Имя deb-пакета, которому принадлежит файл (или '')."""
+    if not path or not shutil.which("dpkg"):
+        return ""
+    rc, out = run(["dpkg", "-S", os.path.realpath(path)])
+    if rc != 0:
+        return ""
+    name = out.strip().splitlines()[0].split(":")[0].strip() if out.strip() else ""
+    return name if re.fullmatch(r"[a-z0-9][a-z0-9.+-]*", name) else ""
+
+
+@app.post("/api/update/hold")
+def update_hold(body: dict, user: str = Depends(auth)):
+    """Закрепить/открепить пакет sing-box в apt, чтобы apt upgrade не заменял версию, поставленную из панели."""
+    name = dpkg_owner(service_binary())
+    if not name:
+        return {"ok": False, "error": "sing-box установлен не из deb-пакета — закреплять нечего"}
+    if not shutil.which("apt-mark"):
+        return {"ok": False, "error": "apt-mark не найден"}
+    hold = bool(body.get("hold"))
+    rc, out = run(["apt-mark", "hold" if hold else "unhold", name])
+    if rc != 0:
+        return {"ok": False, "error": out.strip()[-300:] or f"apt-mark: код {rc}"}
+    return {"ok": True, "message": (f"Пакет {name} закреплён: apt upgrade не будет его обновлять" if hold
+                                    else f"Закрепление пакета {name} снято: apt снова будет его обновлять")}
 
 
 @app.post("/api/update/rollback")
