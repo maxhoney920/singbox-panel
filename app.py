@@ -2621,7 +2621,7 @@ def fetch_releases():
         tag = rel.get("tag_name", "")
         out.append({"tag": tag, "prerelease": bool(rel.get("prerelease")), "published": (rel.get("published_at") or "")[:10],
                     "url": asset.get("browser_download_url", ""), "size": asset.get("size"),
-                    "digest": asset.get("digest") or "", "notes": (rel.get("body") or "")[:8000]})
+                    "digest": asset.get("digest") or ""})
     return out
 
 
@@ -2855,7 +2855,7 @@ def update_info(refresh: int = 0, user: str = Depends(auth)):
     try:
         for r in get_releases(bool(refresh)):
             v = parse_ver(r["tag"])
-            rels.append({"tag": r["tag"], "prerelease": r["prerelease"], "published": r["published"], "notes": r.get("notes", ""),
+            rels.append({"tag": r["tag"], "prerelease": r["prerelease"], "published": r["published"],
                          "size": r["size"], "verified": r["digest"].startswith("sha256:"),
                          "newer": bool(cur and v and v > cur), "current": bool(cur and v == cur)})
     except (OSError, ValueError) as e:        # URLError — подкласс OSError
@@ -3616,9 +3616,35 @@ def pu_loop():
         time.sleep(max(60, PU_INTERVAL - (time.time() - _pu["checked"])))
 
 
+_cl = {"m": None, "data": []}
+
+
+def local_changelog():
+    """Список изменений установленной панели — из CHANGELOG.md, который ставится рядом с app.py."""
+    p = os.path.join(BASE_DIR, "CHANGELOG.md")
+    try:
+        mt = os.path.getmtime(p)
+    except OSError:
+        return []
+    if _cl["m"] != mt:
+        out, cur = [], None
+        with open(p, encoding="utf-8") as f:
+            for line in f:
+                line = line.rstrip()
+                if line.startswith("## "):
+                    cur = {"version": line[3:].strip()[:20], "changes": []}
+                    out.append(cur)
+                elif cur is not None and line.startswith("- "):
+                    cur["changes"].append(line[2:].strip()[:400])
+        _cl.update(m=mt, data=out)
+    return _cl["data"]
+
+
 def _pu_view():
+    me = _verkey(APP_VERSION)
+    hist = [e for e in local_changelog() if e["changes"] and (APP_VERSION == "dev" or _verkey(e["version"]) <= me)][:6]
     return {"ok": True, "version": APP_VERSION, "dpkg": pu_installed_by_dpkg(), "can": bool(shutil.which("dpkg")), "latest": pu_fresh(_pu["latest"]),
-            "checked": _pu["checked"], "error": _pu["error"], "debs": pu_debs()}
+            "checked": _pu["checked"], "error": _pu["error"], "debs": pu_debs(), "history": hist}
 
 
 def pu_start_install(path):

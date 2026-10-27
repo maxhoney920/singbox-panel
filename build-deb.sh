@@ -21,6 +21,7 @@ install -d -m755 "$R/DEBIAN" "$R/usr/bin" "$R/usr/lib/singbox-panel" "$R/lib/sys
                 "$R/etc/default" "$R/etc/pam.d" "$R/usr/share/doc/$PKG"
 sed "s|^APP_VERSION = \"dev\"|APP_VERSION = \"$VERSION\"|" app.py > "$R/usr/lib/singbox-panel/app.py"
 sed "s|<meta name=\"panel-version\" content=\"dev\">|<meta name=\"panel-version\" content=\"$VERSION\">|" index.html > "$R/usr/lib/singbox-panel/index.html"
+install -m644 CHANGELOG.md "$R/usr/lib/singbox-panel/CHANGELOG.md"
 chmod 644 "$R/usr/lib/singbox-panel/app.py" "$R/usr/lib/singbox-panel/index.html"
 grep -q "APP_VERSION = \"$VERSION\"" "$R/usr/lib/singbox-panel/app.py" && grep -q "content=\"$VERSION\"" "$R/usr/lib/singbox-panel/index.html" || { echo "не удалось проставить версию"; exit 1; }
 install -m755 deb/singbox-panel "$R/usr/bin/singbox-panel"
