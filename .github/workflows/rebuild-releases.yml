@@ -17,6 +17,9 @@ jobs:
       - name: Сборка и публикация
         run: |
           trap 'echo "::error::строка $LINENO: $BASH_COMMAND (VER=$VER)"' ERR
+          echo "::warning::diag1 $(gh api -i -X POST repos/${{ github.repository }}/releases -f tag_name=diag-test -f target_commitish=${{ github.sha }} -F draft=true 2>&1 | grep -i 'HTTP/\|accepted\|message' | tr '\n' ' ')"
+          echo "::warning::diag2 $(gh api -i -X POST repos/${{ github.repository }}/releases -f tag_name=diag-test2 -f target_commitish=3bf7eda698d5823d8ad378be3539d2706bebe97f -F draft=true 2>&1 | grep -i 'HTTP/\|accepted\|message' | tr '\n' ' ')"
+          echo "::warning::diag3 $(git push origin ${{ github.sha }}:refs/tags/diag-tag 2>&1 | tr '\n' ' ')"
           cp CHANGELOG.md /tmp/cl.ru; cp CHANGELOG.en.md /tmp/cl.en
           sec() { awk -v v="## $1" '$0==v{f=1;next} /^## /{f=0} f' "$2"; }
           LAST=2.3.1
