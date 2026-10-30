@@ -40,5 +40,5 @@ jobs:
             echo "v$VER опубликован"
           done < <(git ls-remote --heads origin "rel-*" | sed -E "s#^([0-9a-f]+)	refs/heads/rel-#\1 #" | awk '{print $2, $1}' | sort -V)
           gh release delete diag-test --yes --cleanup-tag 2>/dev/null || true
-          git push origin --delete diag-tag diag-test 2>/dev/null || true
+          git push origin --delete diag-tag 2>/dev/null || true
           git push origin --delete $(git ls-remote --heads origin "rel-*" | sed "s#.*refs/heads/##") 2>/dev/null || true
