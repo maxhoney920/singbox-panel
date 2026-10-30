@@ -1,4 +1,4 @@
-# Разовый ручной запуск: заново собрать и опубликовать релизы 2.0.0–2.3.1 (каждый — из своего коммита).
+# Разовый ручной запуск: заново собрать и опубликовать релизы 2.0.0–2.3.1 (каждый — из ветки rel-X.Y.Z: код версии + текущий .github; ветки удаляются после публикации).
 # Нужен после пересоздания репозитория. Текст релиза берётся из CHANGELOG.md / CHANGELOG.en.md ветки main.
 name: rebuild-releases
 on:
@@ -17,9 +17,6 @@ jobs:
       - name: Сборка и публикация
         run: |
           trap 'echo "::error::строка $LINENO: $BASH_COMMAND (VER=$VER)"' ERR
-          echo "::warning::diag1 $(gh api -i -X POST repos/${{ github.repository }}/releases -f tag_name=diag-test -f target_commitish=${{ github.sha }} -F draft=true 2>&1 | grep -i 'HTTP/\|accepted\|message' | tr '\n' ' ')"
-          echo "::warning::diag2 $(gh api -i -X POST repos/${{ github.repository }}/releases -f tag_name=diag-test2 -f target_commitish=3bf7eda698d5823d8ad378be3539d2706bebe97f -F draft=true 2>&1 | grep -i 'HTTP/\|accepted\|message' | tr '\n' ' ')"
-          echo "::warning::diag3 $(git push origin ${{ github.sha }}:refs/tags/diag-tag 2>&1 | tr '\n' ' ')"
           cp CHANGELOG.md /tmp/cl.ru; cp CHANGELOG.en.md /tmp/cl.en
           sec() { awk -v v="## $1" '$0==v{f=1;next} /^## /{f=0} f' "$2"; }
           LAST=2.3.1
@@ -41,18 +38,7 @@ jobs:
               /tmp/w/singbox-panel_${VER}_all.deb /tmp/w/singbox-panel-installer.sh /tmp/w/latest.json > /tmp/rel.log 2>&1 || { echo "::error::release $VER: $(tr '\n' ' ' < /tmp/rel.log | tail -c 800) | files: $(tr '\n' ' ' < /tmp/ls.log)"; exit 1; }
             git worktree remove --force /tmp/w
             echo "v$VER опубликован"
-          done <<'LIST'
-          2.0.0 3bf7eda698d5823d8ad378be3539d2706bebe97f
-          2.0.1 1ce62a99004a5ac7319d0eb258a256471814eb2f
-          2.1.0 6f2ee83b6aa49cbdc7591a2fe56a233b44ab350a
-          2.1.1 179b5a7c3b3a31c6a719ac5c0044ca695f182a77
-          2.1.2 a21a846257c2fa15d31528bd670d31b87d36b764
-          2.1.3 98c0de4ffae208a2e4a3ce50ce94896b25f9e8f9
-          2.1.4 5226fc66f21058a7541ec74690b4a784da91688b
-          2.1.5 0a083cb0c5dd34db37493122e79ce24102d58aba
-          2.2.0 e8bbb15c6a6135ad7c8f7f2b455d9af5b070bfe4
-          2.2.1 e4df10edb99ce87a64b4e09c8bf364714052d577
-          2.2.2 c7452f20157b678a7b78d4369b0b56511dc06487
-          2.3.0 3b5382e72fdae8d2ad8ecc47c422937f34ce9a85
-          2.3.1 b6587357fa538af3065b980008523913053a0e82
-          LIST
+          done < <(git ls-remote --heads origin "rel-*" | sed -E "s#^([0-9a-f]+)	refs/heads/rel-#\1 #" | awk '{print $2, $1}' | sort -V)
+          gh release delete diag-test --yes --cleanup-tag 2>/dev/null || true
+          git push origin --delete diag-tag diag-test 2>/dev/null || true
+          git push origin --delete $(git ls-remote --heads origin "rel-*" | sed "s#.*refs/heads/##") 2>/dev/null || true
