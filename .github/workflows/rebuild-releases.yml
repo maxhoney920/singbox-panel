@@ -33,8 +33,9 @@ jobs:
               fi
             } > /tmp/notes.md
             latest=false; [ "$VER" = "$LAST" ] && latest=true
-            gh release create "v$VER" --target "$SHA" --title "singbox-panel $VER" --notes-file /tmp/notes.md --latest=$latest \
-              /tmp/w/singbox-panel_${VER}_all.deb /tmp/w/singbox-panel-installer.sh /tmp/w/latest.json
+            ls -la /tmp/w/*.deb /tmp/w/*.sh /tmp/w/latest.json > /tmp/ls.log 2>&1 || true
+          gh release create "v$VER" --target "$SHA" --title "singbox-panel $VER" --notes-file /tmp/notes.md --latest=$latest \
+              /tmp/w/singbox-panel_${VER}_all.deb /tmp/w/singbox-panel-installer.sh /tmp/w/latest.json > /tmp/rel.log 2>&1 || { echo "::error::release $VER: $(tr '\n' ' ' < /tmp/rel.log | tail -c 800) | files: $(tr '\n' ' ' < /tmp/ls.log)"; exit 1; }
             git worktree remove --force /tmp/w
             echo "v$VER опубликован"
           done <<'LIST'
