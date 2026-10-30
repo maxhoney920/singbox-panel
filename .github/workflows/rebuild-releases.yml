@@ -16,13 +16,14 @@ jobs:
           fetch-depth: 0
       - name: Сборка и публикация
         run: |
+          trap 'echo "::error::строка $LINENO: $BASH_COMMAND (VER=$VER)"' ERR
           cp CHANGELOG.md /tmp/cl.ru; cp CHANGELOG.en.md /tmp/cl.en
           sec() { awk -v v="## $1" '$0==v{f=1;next} /^## /{f=0} f' "$2"; }
           LAST=2.3.1
           while read -r VER SHA; do
             if gh release view "v$VER" >/dev/null 2>&1; then echo "v$VER уже есть"; continue; fi
             rm -rf /tmp/w && git worktree add -f /tmp/w "$SHA" >/dev/null
-            ( cd /tmp/w && ./build-deb.sh "$VER" >/dev/null && ./make-bundle.sh "$VER" >/dev/null 2>&1 || ./make-bundle.sh >/dev/null )
+            ( cd /tmp/w && ./build-deb.sh "$VER" > /tmp/build.log 2>&1 || { echo "::error::build-deb $VER: $(tail -c 600 /tmp/build.log | tr '\n' ' ')"; exit 1; }; ./make-bundle.sh "$VER" > /tmp/bundle.log 2>&1 || ./make-bundle.sh > /tmp/bundle.log 2>&1 || { echo "::error::make-bundle $VER: $(tail -c 600 /tmp/bundle.log | tr '\n' ' ')"; exit 1; } )
             {
               sec "$VER" /tmp/cl.ru
               printf '\n**Установка:** `sudo apt install ./singbox-panel_%s_all.deb` или `sudo bash singbox-panel-installer.sh`.\n`latest.json` — файл для самообновления панели.\n' "$VER"
