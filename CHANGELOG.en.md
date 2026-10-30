@@ -1,3 +1,9 @@
+## 2.4.0
+- New look in the SafeBridge style: dark blue tones and an orange accent, a logo in the header and on the browser tab, the menu and sub-tabs are segmented switches
+- Light theme and a theme button in the header: auto (as in the system), dark, light — the choice is remembered in the browser
+- Home page: a large "Connected / Disconnected" panel with the server, uptime and a switch that starts or stops sing-box
+- "Servers": the selected server is highlighted, the delay is shown in green, the rows are larger
+
 ## 2.3.1
 - Phone layout: a compact header (the menu scrolls in one line, language and "Log out" on top), settings sub-tabs in one line, backup and routing rule tables turn into cards, long names and JSON wrap, nothing goes beyond the screen edge
 - Fixed the date of sing-box binary backups: "1970-01-01" was shown for a binary from a package
