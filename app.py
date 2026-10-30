@@ -1475,11 +1475,12 @@ def _startup():
 
 
 # ------------------------------------------------- готовые наборы маршрутизации
-PRESET_REV = 2           # увеличивайте при изменении списков; прежние списки добавляйте в PRESET_HISTORY
+PRESET_REV = 3           # увеличивайте при изменении списков; прежние списки добавляйте в PRESET_HISTORY
 PRESETS = {
     "lan": {"t": "Локальные адреса (192.168.x.x, 10.x.x.x…)", "d": "direct",
             "r": [{"ip_cidr": ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.0/8"]}]},
     "ru": {"t": "Российские домены (.ru, .su, .рф)", "d": "direct", "r": [{"domain_suffix": ["ru", "su", "xn--p1ai"]}]},
+    "avito": {"t": "Авито (картинки и сайт напрямую)", "d": "direct", "r": [{"domain_suffix": ["avito.ru", "avito.st", "avito.com", "avito.tech"]}]},
     "youtube": {"t": "YouTube", "d": "proxy", "r": [{"domain_suffix": [
         "youtube.com", "youtu.be", "googlevideo.com", "ytimg.com", "ggpht.com", "youtube-nocookie.com", "youtubei.googleapis.com"]}]},
     "telegram": {"t": "Telegram", "d": "proxy", "r": [
