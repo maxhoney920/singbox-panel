@@ -1647,6 +1647,7 @@ def migrate_presets(auto=False):
                 n += 1
         res = {"ok": True, "message": "Наборы уже актуальны", "changed": 0}
         if n:
+            _lan_first((cfg.get("route") or {}).get("rules", []) or [])
             res = apply_config(json.dumps(cfg), "apply" if not (auto and not _active()) else "save")
             res["changed"] = n if res.get("ok") else 0
             if res.get("ok"):
@@ -1691,6 +1692,25 @@ def p2p_toggle(body: dict, user: str = Depends(auth)):
         return apply_config(json.dumps(cfg), "apply")
 
 
+def _is_lan_rule(r):
+    """Правило «локальная сеть напрямую»: ip_cidr с частными подсетями (из кнопки TUN или набора «Локальные адреса»)."""
+    if not isinstance(r, dict) or set(r) - {"ip_cidr", "action", "outbound"} or not isinstance(r.get("ip_cidr"), list):
+        return False
+    return set(r["ip_cidr"]) in (set(PRIVATE_NETS), set(PRESETS["lan"]["r"][0]["ip_cidr"]))
+
+
+def _lan_first(rules):
+    """Правила локальной сети идут первыми (после sniff/hijack-dns/resolve): доменные наборы не должны их перехватывать."""
+    lan = [r for r in rules if _is_lan_rule(r)]
+    if not lan:
+        return
+    rest = [r for r in rules if not _is_lan_rule(r)]
+    i = 0
+    while i < len(rest) and isinstance(rest[i], dict) and rest[i].get("action") in ("sniff", "hijack-dns", "resolve"):
+        i += 1
+    rules[:] = rest[:i] + lan + rest[i:]
+
+
 @app.get("/api/presets")
 def presets_list(user: str = Depends(auth)):
     return {"ok": True, "presets": PRESETS, "history": PRESET_HISTORY, "rev": PRESET_REV, **_presets}
@@ -1727,7 +1747,8 @@ def presets_add(body: dict, user: str = Depends(auth)):
         for pid in ids:
             for pr in PRESETS[pid]["r"]:
                 f = next(iter(pr))
-                ex = next((r for r in rules if isinstance(r, dict) and _preset_rule_field(r) == f and set(r[f]) == set(pr[f])), None)
+                ex = next((r for r in rules if isinstance(r, dict) and ((pid == "lan" and _is_lan_rule(r)) or
+                          (_preset_rule_field(r) == f and set(r[f]) == set(pr[f])))), None)
                 for k in ("action", "outbound"):
                     (ex or {}).pop(k, None)
                 tgt = {**({"action": "route"} if new else {}), "outbound": target}
@@ -1739,6 +1760,7 @@ def presets_add(body: dict, user: str = Depends(auth)):
         while idx < len(rules) and isinstance(rules[idx], dict) and rules[idx].get("action") in ("sniff", "hijack-dns", "resolve"):
             idx += 1
         rules[idx:idx] = fresh
+        _lan_first(rules)
         return apply_config(json.dumps(cfg), "apply")
 
 

@@ -1,3 +1,7 @@
+## 2.4.1
+- Preset routing sets are no longer placed above the "local network direct" rule: the local addresses rule always stays first (after sniff and hijack-dns), so domain sets (Gemini, OpenAI, Avito, etc.) do not intercept traffic to the local network. If the order is already broken, add the "Local addresses" set (direction "direct") once more — the rule moves back to its place
+- The OpenAI / Claude sets were extended, and Gemini / AI Studio / NotebookLM and Avito sets were added
+
 ## 2.4.0
 - New look in the SafeBridge style: dark blue tones and an orange accent, a logo in the header and on the browser tab, the menu and sub-tabs are segmented switches
 - Light theme and a theme button in the header: auto (as in the system), dark, light — the choice is remembered in the browser
