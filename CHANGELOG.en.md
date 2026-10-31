@@ -1,3 +1,7 @@
+## 2.5.0
+- XHTTP nodes through Xray (optional): sing-box does not support the XHTTP transport, so such nodes from subscriptions did not work before. "Settings → Updates → Xray for XHTTP": the "Install and enable" button downloads Xray from GitHub (with a checksum check), reloads the subscriptions and creates a separate `singbox-panel-xray` service. In sing-box such a node looks like a regular one (with the same name), so server selection, the backup server, routes, TUN and the gateway work as before. XHTTP parameters (path, host, mode, extra, tls/reality) are taken from the link. Xray's own traffic bypasses the tunnel (the "process xray → direct" rule) so there is no loop
+- Xray can be updated (with a rollback if the new version does not start), disabled (XHTTP nodes are removed from sing-box) and removed; "Delete everything" removes it too. While Xray is off, XHTTP nodes are skipped with a clear reason instead of being added in a broken state
+
 ## 2.4.1
 - Preset routing sets are no longer placed above the "local network direct" rule: the local addresses rule always stays first (after sniff and hijack-dns), so domain sets (Gemini, OpenAI, Avito, etc.) do not intercept traffic to the local network. If the order is already broken, add the "Local addresses" set (direction "direct") once more — the rule moves back to its place
 - The OpenAI / Claude sets were extended, and Gemini / AI Studio / NotebookLM and Avito sets were added

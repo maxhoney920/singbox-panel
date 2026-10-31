@@ -851,11 +851,31 @@ def transport_block(typ, path="", host="", service=""):
     return None
 
 
+def xhttp_params(qs):
+    """Параметры транспорта XHTTP из ссылки vless:// (sing-box его не поддерживает — такие узлы идут через Xray)."""
+    extra = {}
+    if q1(qs, "extra"):
+        try:
+            extra = json.loads(q1(qs, "extra"))
+        except ValueError:
+            extra = {}
+        if not isinstance(extra, dict) or len(json.dumps(extra)) > 20000:
+            extra = {}
+    return {"path": q1(qs, "path") or "/", "host": q1(qs, "host"), "mode": q1(qs, "mode") or "auto", "extra": extra,
+            "security": q1(qs, "security") or "none", "sni": q1(qs, "sni") or q1(qs, "peer"), "fp": q1(qs, "fp"),
+            "alpn": q1(qs, "alpn"), "insecure": q1(qs, "allowInsecure") in ("1", "true") or q1(qs, "insecure") in ("1", "true"),
+            "pbk": q1(qs, "pbk"), "sid": q1(qs, "sid"), "spx": q1(qs, "spx"), "encryption": q1(qs, "encryption") or "none",
+            "flow": q1(qs, "flow")}
+
+
 def parse_vless(u):
     p = urllib.parse.urlsplit(u)
     qs = urllib.parse.parse_qs(p.query)
     o = {"type": "vless", "tag": urllib.parse.unquote(p.fragment) or p.hostname,
          "server": p.hostname, "server_port": p.port, "uuid": urllib.parse.unquote(p.username or "")}
+    if q1(qs, "type") in ("xhttp", "splithttp"):
+        o["_xhttp"] = xhttp_params(qs)             # узел отдельного вида: см. xray_split()
+        return o
     if q1(qs, "flow"):
         o["flow"] = q1(qs, "flow")
     tls = tls_block(qs, q1(qs, "security"))
@@ -1145,7 +1165,7 @@ def update_subscriptions(sids=None, restart=True, dry=False, auto=False):
         if not subs:
             return {"ok": False, "error": "URL подписки не задан" if not st["subs"] else "Подписка не найдена"}
         now = time.time()
-        loaded, failed = [], []
+        loaded, failed, xalloc = [], [], set()
         for sub in subs:
             sub["last_attempt"] = now
             try:
@@ -1161,12 +1181,18 @@ def update_subscriptions(sids=None, restart=True, dry=False, auto=False):
                 if not nodes:
                     raise ValueError("В подписке не найдено ни одного поддерживаемого узла")
                 total = len(nodes)
+                nodes, xdefs, xrej = xray_split(nodes, sub["id"], st, xalloc)       # узлы XHTTP → локальные socks через Xray
                 # каждый узел проверяется вашим sing-box отдельно: что версия не понимает, отбрасывается с причиной
-                nodes, rejected, checked = validate_nodes(nodes)
+                nodes, rejected, checked = validate_nodes(nodes) if nodes else ([], [], True)
+                rejected = xrej + rejected
                 if not nodes:
+                    if xrej and len(xrej) == total and all(r["reason"] == XHTTP_NEED for r in xrej):
+                        raise ValueError(XHTTP_NEED)
                     raise ValueError(f"Ни один из {total} узлов не подходит вашей версии sing-box "
                                      f"({sb_version() or '?'}). Пример причины: {rejected[0]['reason']}")
-                loaded.append({"sub": sub, "nodes": nodes, "bad": bad, "rejected": rejected, "checked": checked, "total": total})
+                xdefs = [d for d in xdefs if d[0] in {n["tag"] for n in nodes}]
+                loaded.append({"sub": sub, "nodes": nodes, "bad": bad, "rejected": rejected, "checked": checked, "total": total,
+                               "xdefs": xdefs})
             except Exception as e:
                 sub["last_error"] = str(e)
                 failed.append({"id": sub["id"], "name": sub["name"], "ok": False, "error": str(e)})
@@ -1206,11 +1232,12 @@ def update_subscriptions(sids=None, restart=True, dry=False, auto=False):
             if broken:
                 raise ValueError("Обновление отменено: после него пропали серверы, на которые ведут правила маршрутизации: "
                                  + ", ".join(broken) + ". Измените эти правила (вкладка «Маршрутизация») или направьте их в группу.")
+            xerr = xray_commit(st, cfg, loaded)             # конфиг и служба Xray, правило «Xray напрямую» в sing-box
             if auto and json.dumps(cfg, sort_keys=True) == before:
                 for L in loaded:
                     L["sub"]["last_update"], L["sub"]["last_error"] = time.time(), ""
                 save_state(st)
-                return {"ok": True, "message": "Без изменений"}
+                return {"ok": True, "message": "Без изменений" + (f". ⚠ Xray: {xerr}" if xerr else "")}
             gnote = []
             for L in loaded:
                 tags = {n["tag"] for n in L["nodes"]}
@@ -1236,6 +1263,8 @@ def update_subscriptions(sids=None, restart=True, dry=False, auto=False):
                               + ". В группах: " + "; ".join(gnote)
                               + ("" if restart else ". Сохранено БЕЗ перезапуска: на вкладке «Серверы» изменения появятся после перезапуска sing-box"))
             res["groups"] = gnote
+            if xerr:
+                res["message"] += f". ⚠ Xray: {xerr}"
         return res
 
 
@@ -2204,6 +2233,412 @@ def validate_nodes(nodes):
     ok = [n for n, e in res if e is None]
     bad = [{"tag": n["tag"], "reason": e} for n, e in res if e is not None]
     return ok, bad, True
+
+
+# ------------------------------------------------------------ Xray для узлов XHTTP (необязательно, по кнопке)
+# sing-box не умеет транспорт XHTTP. Если включить Xray, каждый такой узел становится в sing-box обычным socks-узлом
+# 127.0.0.1:порт, а Xray (отдельная служба) принимает его трафик и отправляет на сервер по vless+xhttp.
+# Выбор сервера, резервный сервер, маршруты, TUN и шлюз работают как обычно.
+XRAY_BIN = os.environ.get("SBP_XRAY_BIN", "/usr/local/bin/xray")
+XRAY_UNIT = "singbox-panel-xray"
+XRAY_DIR = os.path.join(DATA, "xray")
+XRAY_CFG = os.path.join(XRAY_DIR, "config.json")
+XRAY_REL_URL = "https://api.github.com/repos/XTLS/Xray-core/releases/latest"
+XRAY_DL_PREFIX = "https://github.com/XTLS/Xray-core/releases/download/"
+XRAY_ARCHES = {"x86_64": "64", "amd64": "64", "aarch64": "arm64-v8a", "arm64": "arm64-v8a", "armv7l": "arm32-v7a",
+               "armv6l": "arm32-v6", "i686": "32", "i386": "32", "riscv64": "riscv64", "s390x": "s390x", "loongarch64": "loong64"}
+XRAY_PORT0 = 20800
+XRAY_MARK = "installed by singbox-panel"
+XHTTP_NEED = ("Узел использует транспорт XHTTP, который sing-box не поддерживает. "
+              "Включите Xray: Настройки → Обновления → «Xray для XHTTP»")
+_xr = {"latest": None, "t": 0.0, "error": ""}
+XRAY_LOCK = threading.Lock()
+
+
+def xray_find():
+    if os.path.isfile(XRAY_BIN) and os.access(XRAY_BIN, os.X_OK):
+        return XRAY_BIN
+    return shutil.which("xray") or ""
+
+
+def xray_version(path=None):
+    path = path or xray_find()
+    if not path:
+        return ""
+    m = re.search(r"Xray\s+(\d+(?:\.\d+)+)", (run([path, "version"], timeout=10)[1] or ""))
+    return m.group(1) if m else ""
+
+
+def _xray_unit_path():
+    return os.path.join(SYSTEMD_DIR, XRAY_UNIT + ".service")
+
+
+def xray_active():
+    return run(["systemctl", "is-active", XRAY_UNIT])[1].strip() == "active"
+
+
+def xray_outbound(n, tag):
+    x = n["_xhttp"] if "_xhttp" in n else n["x"]
+    user = {"id": n["uuid"], "encryption": x.get("encryption") or "none"}
+    if x.get("flow"):
+        user["flow"] = x["flow"]
+    xs = {"path": x.get("path") or "/", "host": x.get("host") or "", "mode": x.get("mode") or "auto"}
+    if x.get("extra"):
+        xs["extra"] = x["extra"]
+    ss = {"network": "xhttp", "security": x.get("security") or "none", "xhttpSettings": xs}
+    if ss["security"] == "tls":
+        t = {"serverName": x.get("sni") or x.get("host") or n["server"], "fingerprint": x.get("fp") or "chrome"}
+        if x.get("alpn"):
+            t["alpn"] = x["alpn"].split(",")
+        if x.get("insecure"):
+            t["allowInsecure"] = True
+        ss["tlsSettings"] = t
+    elif ss["security"] == "reality":
+        ss["realitySettings"] = {"serverName": x.get("sni", ""), "fingerprint": x.get("fp") or "chrome", "publicKey": x.get("pbk", ""),
+                                 "shortId": x.get("sid", ""), "spiderX": x.get("spx", "")}
+    return {"tag": tag, "protocol": "vless", "settings": {"vnext": [{"address": n["server"], "port": int(n["server_port"]), "users": [user]}]},
+            "streamSettings": ss}
+
+
+def xray_config(entries):
+    """entries: {тег узла: {port, server, server_port, uuid, x}} → конфиг Xray: по одному socks-входу на узел."""
+    ins, outs, rules = [], [], []
+    for tag, e in sorted(entries.items(), key=lambda kv: kv[1]["port"]):
+        k = e["port"]
+        ins.append({"tag": f"in-{k}", "listen": "127.0.0.1", "port": k, "protocol": "socks",
+                    "settings": {"auth": "noauth", "udp": True, "ip": "127.0.0.1"}})
+        outs.append(xray_outbound(e, f"out-{k}"))
+        rules.append({"type": "field", "inboundTag": [f"in-{k}"], "outboundTag": f"out-{k}"})
+    return {"log": {"loglevel": "warning"}, "inbounds": ins, "outbounds": outs, "routing": {"domainStrategy": "AsIs", "rules": rules}}
+
+
+def xray_test(cfg):
+    """Проверка конфига самим Xray. Возвращает текст ошибки или ''."""
+    path = xray_find()
+    if not path:
+        return "Xray не установлен"
+    tmp = tempfile.mkdtemp(prefix="sbx-")
+    try:
+        f = os.path.join(tmp, "c.json")
+        with open(f, "w") as fh:
+            json.dump(cfg, fh)
+        rc, out = run([path, "run", "-test", "-c", f], timeout=20)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    if rc == 0:
+        return ""
+    line = next((l.strip() for l in reversed(out.splitlines()) if l.strip()), "ошибка проверки")
+    return re.sub(r"^Xray \S+ started\s*", "", line)[:200]
+
+
+def xray_split(nodes, sid, st, alloc):
+    """Узлы XHTTP → socks-узлы sing-box (127.0.0.1:порт). Без включённого Xray такие узлы отклоняются с причиной.
+    Возвращает (узлы для sing-box, [(тег, описание для Xray)], отклонённые)."""
+    xs = st.get("xray") or {}
+    enabled = bool(xs.get("enabled")) and bool(xray_find())
+    others = {e["port"] for t, e in (xs.get("nodes") or {}).items() if e.get("sub") != sid}
+    out, defs, rej = [], [], []
+    for n in nodes:
+        if "_xhttp" not in n:
+            out.append(n)
+            continue
+        if not enabled:
+            rej.append({"tag": n["tag"], "reason": XHTTP_NEED})
+            continue
+        err = xray_test(xray_config({"t": {"port": XRAY_PORT0, "server": n["server"], "server_port": n["server_port"],
+                                            "uuid": n["uuid"], "x": n["_xhttp"]}}))
+        if err:
+            rej.append({"tag": n["tag"], "reason": "Xray: " + err})
+            continue
+        old = (xs.get("nodes") or {}).get(n["tag"])
+        port = old["port"] if old and old.get("sub") == sid and old["port"] not in alloc else 0
+        if not port:
+            port = XRAY_PORT0
+            while port in alloc or port in others:
+                port += 1
+        alloc.add(port)
+        out.append({"type": "socks", "tag": n["tag"], "server": "127.0.0.1", "server_port": port, "version": "5"})
+        defs.append((n["tag"], {"sub": sid, "port": port, "server": n["server"], "server_port": n["server_port"],
+                                "uuid": n["uuid"], "x": n["_xhttp"]}))
+    return out, defs, rej
+
+
+def _is_xray_rule(r):
+    return isinstance(r, dict) and r.get("process_name") == ["xray"] and not (set(r) - {"process_name", "action", "outbound"})
+
+
+def xray_rule(cfg, want):
+    """Трафик самого Xray идёт мимо sing-box (direct): иначе TUN завернул бы его обратно, получилась бы петля."""
+    route = cfg.get("route")
+    if not want and not (isinstance(route, dict) and any(_is_xray_rule(r) for r in route.get("rules") or [])):
+        return
+    route = cfg.setdefault("route", {})
+    rules = route.setdefault("rules", [])
+    rules[:] = [r for r in rules if not _is_xray_rule(r)]
+    if not want:
+        return
+    direct = next((o["tag"] for o in cfg.get("outbounds", []) if o.get("type") == "direct" and o.get("tag")), "")
+    if not direct:
+        direct = "direct"
+        cfg.setdefault("outbounds", []).append({"type": "direct", "tag": direct})
+    new = (parse_ver(sb_version()) or (1, 12, 0)) >= (1, 11, 0)
+    i = 0
+    while i < len(rules) and isinstance(rules[i], dict) and rules[i].get("action") in ("sniff", "hijack-dns", "resolve"):
+        i += 1
+    rules.insert(i, {"process_name": ["xray"], **({"action": "route"} if new else {}), "outbound": direct})
+
+
+def xray_unit_write():
+    path = xray_find() or XRAY_BIN
+    os.makedirs(SYSTEMD_DIR, exist_ok=True)
+    with open(_xray_unit_path(), "w") as f:
+        f.write(f"# {XRAY_MARK}\n[Unit]\nDescription=Xray: XHTTP nodes for sing-box (singbox-panel)\nAfter=network-online.target\n"
+                f"Wants=network-online.target\n\n[Service]\nExecStart={path} run -c {XRAY_CFG}\nRestart=on-failure\nRestartSec=3\n"
+                f"LimitNOFILE=65535\n\n[Install]\nWantedBy=multi-user.target\n")
+    run(["systemctl", "daemon-reload"])
+
+
+def xray_apply(st):
+    """Записывает конфиг Xray из состояния панели и запускает/останавливает службу. Возвращает текст ошибки или ''."""
+    nodes = (st.get("xray") or {}).get("nodes") or {}
+    if not nodes:
+        if os.path.isfile(_xray_unit_path()):
+            run(["systemctl", "disable", "--now", XRAY_UNIT], timeout=60)
+        return ""
+    if not xray_find():
+        return "Xray не установлен"
+    text = json.dumps(xray_config(nodes), ensure_ascii=False, indent=2)
+    try:
+        old = open(XRAY_CFG).read()
+    except OSError:
+        old = None
+    os.makedirs(XRAY_DIR, exist_ok=True)
+    tmp = XRAY_CFG + ".tmp"
+    with open(tmp, "w") as f:
+        f.write(text)
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, XRAY_CFG)
+    if not os.path.isfile(_xray_unit_path()):
+        xray_unit_write()
+    run(["systemctl", "enable", XRAY_UNIT], timeout=30)
+    rc, out = run(["systemctl", "restart" if (old != text or not xray_active()) else "start", XRAY_UNIT], timeout=60)
+    time.sleep(SETTLE[0])
+    if not xray_active():
+        tail = run(["journalctl", "-u", XRAY_UNIT, "-n", "5", "--no-pager", "-o", "cat"])[1].strip().splitlines()
+        return "служба не запустилась" + (": " + tail[-1][:200] if tail else (": " + out.strip()[:200] if out.strip() else ""))
+    return ""
+
+
+def xray_commit(st, cfg, loaded):
+    """После успешного разбора подписок: запоминает узлы XHTTP, обновляет Xray и правило в конфиге sing-box."""
+    xs = st.setdefault("xray", {})
+    cur = xs.setdefault("nodes", {})
+    for L in loaded:
+        for t in [t for t, e in cur.items() if e.get("sub") == L["sub"]["id"]]:
+            del cur[t]
+        cur.update(dict(L.get("xdefs") or []))
+    xray_rule(cfg, bool(cur))
+    return xray_apply(st)
+
+
+def _xray_asset(rel, arch):
+    name = f"Xray-linux-{arch}.zip"
+    a = next((x for x in rel.get("assets", []) if x.get("name") == name), None)
+    if not a:
+        raise ValueError(f"для архитектуры {platform.machine()} нет сборки Xray")
+    url = a.get("browser_download_url", "")
+    if not url.startswith(XRAY_DL_PREFIX):
+        raise ValueError("недопустимый адрес загрузки")
+    dig = a.get("digest") or ""
+    sha = dig.split(":", 1)[1].lower() if dig.startswith("sha256:") else ""
+    if not sha:                                                  # у релиза нет digest: берём файл .dgst рядом
+        try:
+            with urllib.request.urlopen(urllib.request.Request(url + ".dgst", headers={"User-Agent": "singbox-panel"}), timeout=20) as r:
+                m = re.search(r"SHA2-256=\s*([0-9a-fA-F]{64})", r.read(20000).decode("utf-8", "replace"))
+            sha = m.group(1).lower() if m else ""
+        except OSError:
+            sha = ""
+    return {"url": url, "sha": sha, "size": a.get("size")}
+
+
+def xray_latest(refresh=False):
+    if not refresh and _xr["latest"] and time.time() - _xr["t"] < 600:
+        return _xr["latest"]
+    arch = XRAY_ARCHES.get(platform.machine().lower())
+    if not arch:
+        raise ValueError(f"архитектура {platform.machine()} не поддерживается")
+    req = urllib.request.Request(XRAY_REL_URL, headers={"User-Agent": "singbox-panel", "Accept": "application/vnd.github+json"})
+    with urllib.request.urlopen(req, timeout=20) as r:
+        rel = json.load(r)
+    d = {"tag": rel.get("tag_name", ""), "version": rel.get("tag_name", "").lstrip("v"), **_xray_asset(rel, arch)}
+    _xr["latest"], _xr["t"] = d, time.time()
+    return d
+
+
+def xray_install(upgrade=False):
+    """Скачивает Xray с GitHub (XTLS/Xray-core), проверяет sha256, ставит в /usr/local/bin/xray. Прежний бинарник сохраняется для отката."""
+    rel = xray_latest(refresh=True)
+    wd = os.path.join(UPD_DIR, "xray")
+    shutil.rmtree(wd, ignore_errors=True)
+    os.makedirs(wd)
+    prog("xray", "Скачивание Xray " + rel["tag"], 0)
+    pkg = os.path.join(wd, "xray.zip")
+    sha, size = _download(rel["url"], pkg, limit=120 * 1024 * 1024)
+    prog(stage="Проверка контрольной суммы и распаковка", pct=82)
+    if rel["sha"] and rel["sha"] != sha:
+        shutil.rmtree(wd, ignore_errors=True)
+        raise ValueError("контрольная сумма архива не совпала с указанной GitHub — файл повреждён или подменён")
+    import zipfile
+    staged = os.path.join(wd, "xray")
+    with zipfile.ZipFile(pkg) as z:
+        with z.open("xray") as src, open(staged, "wb") as dst:
+            shutil.copyfileobj(src, dst)
+    os.chmod(staged, 0o755)
+    if not xray_version(staged):
+        raise ValueError("скачанный файл не запускается на этом устройстве")
+    target = xray_find() or XRAY_BIN
+    os.makedirs(os.path.dirname(target), exist_ok=True)
+    if os.path.isfile(target):
+        shutil.copy2(target, target + ".old")
+    shutil.copy2(staged, target + ".new")
+    os.replace(target + ".new", target)
+    shutil.rmtree(wd, ignore_errors=True)
+    prog(stage="Готово", pct=100, active=False)
+    return rel["version"]
+
+
+def xray_view():
+    st = load_state()
+    xs = st.get("xray") or {}
+    path = xray_find()
+    ver = xray_version(path) if path else ""
+    lat = _xr["latest"]
+    return {"ok": True, "installed": bool(path), "path": path, "version": ver, "enabled": bool(xs.get("enabled")),
+            "active": xray_active() if path else False, "nodes": len(xs.get("nodes") or {}),
+            "arch_ok": platform.machine().lower() in XRAY_ARCHES, "arch": platform.machine(),
+            "latest": (lat or {}).get("version", ""), "newer": bool(lat and ver and _verkey(lat["version"]) > _verkey(ver)),
+            "unit": os.path.isfile(_xray_unit_path()), "error": _xr["error"]}
+
+
+def _xray_refresh_subs():
+    st = load_state()
+    if not any(x.get("url") or x.get("links") for x in st["subs"]):
+        return {"ok": True, "message": "подписок нет: узлы XHTTP появятся при добавлении подписки"}
+    return update_subscriptions(None, restart=True)
+
+
+def xray_remove_files(log=None):
+    log = log if log is not None else []
+    run(["systemctl", "disable", "--now", XRAY_UNIT], timeout=60)
+    ours = False
+    try:
+        ours = XRAY_MARK in open(_xray_unit_path()).read()
+    except OSError:
+        pass
+    if ours:
+        _rm(_xray_unit_path(), log)
+        for f in (XRAY_BIN, XRAY_BIN + ".old", XRAY_BIN + ".new"):
+            _rm(f, log)
+    _rm(XRAY_DIR, log)
+    run(["systemctl", "daemon-reload"])
+    return log
+
+
+@app.get("/api/xray")
+def xray_get(user: str = Depends(auth)):
+    return xray_view()
+
+
+@app.post("/api/xray")
+def xray_post(body: dict, user: str = Depends(auth)):
+    act = body.get("action")
+    if act == "check":
+        try:
+            _xr["error"] = ""
+            xray_latest(refresh=True)
+        except (OSError, ValueError) as e:
+            _xr["error"] = str(getattr(e, "reason", e))
+            return {**xray_view(), "ok": False, "error": "Не удалось получить список версий Xray: " + _xr["error"]}
+        return {**xray_view(), "message": "Версии Xray проверены"}
+    if act not in ("enable", "disable", "update", "remove"):
+        return {"ok": False, "error": "Неизвестное действие"}
+    if not XRAY_LOCK.acquire(blocking=False):
+        return {"ok": False, "error": "Операция с Xray уже выполняется"}
+    try:
+        if act == "enable":
+            if not xray_find():
+                try:
+                    v = xray_install()
+                except (OSError, ValueError, KeyError, urllib.error.URLError) as e:
+                    prog(active=False)
+                    return {"ok": False, "error": "Не удалось установить Xray: " + str(getattr(e, "reason", e))}
+                xray_unit_write()
+            with LOCK:
+                st = load_state()
+                st.setdefault("xray", {})["enabled"] = True
+                save_state(st)
+            prog("xray", "Загрузка узлов XHTTP из подписок", 90)
+            res = _xray_refresh_subs()
+            prog(active=False)
+            n = len((load_state().get("xray") or {}).get("nodes") or {})
+            if not res.get("ok"):
+                return {"ok": False, "error": "Xray установлен и включён, но подписки не обновились: " + str(res.get("error")),
+                        **{k: v for k, v in xray_view().items() if k not in ("ok", "error")}}
+            return {**xray_view(), "ok": True, "message": f"Xray включён, узлов XHTTP: {n}. " + str(res.get("message", ""))}
+        if act == "disable":
+            with LOCK:
+                st = load_state()
+                st.setdefault("xray", {})["enabled"] = False
+                save_state(st)
+            res = _xray_refresh_subs()
+            if not res.get("ok"):
+                with LOCK:
+                    st = load_state()
+                    st.setdefault("xray", {})["enabled"] = True
+                    save_state(st)
+                return {"ok": False, "error": "Не удалось обновить подписки без узлов XHTTP: " + str(res.get("error"))}
+            with LOCK:
+                st = load_state()
+                st["xray"]["nodes"] = {}
+                save_state(st)
+                xray_apply(st)
+            return {**xray_view(), "ok": True, "message": "Xray выключен, узлы XHTTP убраны из sing-box. " + str(res.get("message", ""))}
+        if act == "update":
+            old = xray_version()
+            try:
+                xray_latest(refresh=True)
+                if old and _verkey(_xr["latest"]["version"]) <= _verkey(old):
+                    return {**xray_view(), "ok": True, "message": f"Установлена последняя версия Xray ({old})"}
+                v = xray_install(upgrade=True)
+            except (OSError, ValueError, KeyError, urllib.error.URLError) as e:
+                prog(active=False)
+                return {"ok": False, "error": "Не удалось обновить Xray: " + str(getattr(e, "reason", e))}
+            if xray_active() or load_state().get("xray", {}).get("nodes"):
+                run(["systemctl", "restart", XRAY_UNIT], timeout=60)
+                time.sleep(SETTLE[0])
+                if not xray_active():
+                    t = xray_find()
+                    if os.path.isfile(t + ".old"):
+                        shutil.copy2(t + ".old", t)
+                        run(["systemctl", "restart", XRAY_UNIT], timeout=60)
+                    return {**xray_view(), "ok": False, "error": f"Xray {v} не запустился — возвращена прежняя версия {old or ''}"}
+            return {**xray_view(), "ok": True, "message": f"Xray обновлён: {old or '?'} → {v}"}
+        # remove
+        with LOCK:
+            st = load_state()
+            st.setdefault("xray", {})["enabled"] = False
+            save_state(st)
+        res = _xray_refresh_subs()
+        if not res.get("ok"):
+            return {"ok": False, "error": "Не удалось обновить подписки без узлов XHTTP: " + str(res.get("error")) + ". Xray не удалён"}
+        with LOCK:
+            st = load_state()
+            st["xray"] = {"enabled": False, "nodes": {}}
+            save_state(st)
+        xray_remove_files()
+        return {**xray_view(), "ok": True, "message": "Xray удалён, узлы XHTTP убраны из sing-box"}
+    finally:
+        XRAY_LOCK.release()
 
 
 # ------------------------------------------------ устройство: CPU / память / температура
@@ -3826,6 +4261,7 @@ def reset_all(body: dict, user: str = Depends(auth)):
         else:
             log.append("бинарник и служба sing-box остались: их поставили не через панель (удалите пакетом: apt remove sing-box)")
         run(["systemctl", "daemon-reload"])
+        xray_remove_files(log)
         _rm(CONFIG, log)
         for d in (BACKUPS, BIN_BACKUPS, UPD_DIR, GW_DIR, STATE_FILE, TRAFFIC_FILE, PRESETS_FILE, OS_LOG):
             _rm(d, log)
