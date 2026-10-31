@@ -1,3 +1,6 @@
+## 2.5.1
+- Xray for XHTTP: the "Xray direct" rule now sits above the DNS hijack (hijack-dns), so Xray's own DNS queries do not go through sing-box and its proxy (otherwise, with a domain as the server address, a loop is possible: finding the XHTTP server requires the server itself). New route sets and the local network rule are no longer inserted above it. The rule is moved at the next subscription update
+
 ## 2.5.0
 - XHTTP nodes through Xray (optional): sing-box does not support the XHTTP transport, so such nodes from subscriptions did not work before. "Settings → Updates → Xray for XHTTP": the "Install and enable" button downloads Xray from GitHub (with a checksum check), reloads the subscriptions and creates a separate `singbox-panel-xray` service. In sing-box such a node looks like a regular one (with the same name), so server selection, the backup server, routes, TUN and the gateway work as before. XHTTP parameters (path, host, mode, extra, tls/reality) are taken from the link. Xray's own traffic bypasses the tunnel (the "process xray → direct" rule) so there is no loop
 - Xray can be updated (with a rollback if the new version does not start), disabled (XHTTP nodes are removed from sing-box) and removed; "Delete everything" removes it too. While Xray is off, XHTTP nodes are skipped with a clear reason instead of being added in a broken state

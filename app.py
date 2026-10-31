@@ -535,9 +535,7 @@ def tun_toggle(body: dict, user: str = Depends(auth)):
         new = ver >= (1, 11, 0)
         lan = {"ip_cidr": PRIVATE_NETS, **({"action": "route"} if new else {}), "outbound": "direct"}
         if not any(isinstance(r, dict) and r.get("ip_cidr") == PRIVATE_NETS for r in rules):
-            i = 0                                       # локальная сеть (SSH, эта панель) мимо туннеля, но после sniff/hijack-dns
-            while i < len(rules) and isinstance(rules[i], dict) and rules[i].get("action") in ("sniff", "hijack-dns", "resolve"):
-                i += 1
+            i = _lead_idx(rules)                        # локальная сеть (SSH, эта панель) мимо туннеля, но после sniff/hijack-dns
             rules.insert(i, lan)
         if new and not any(isinstance(r, dict) and r.get("action") == "sniff" for r in rules):
             rules.insert(0, {"action": "sniff"})
@@ -1714,11 +1712,17 @@ def p2p_toggle(body: dict, user: str = Depends(auth)):
                 for ib in cfg.get("inbounds", []) or []:
                     if ib.get("type") in ("tun", "mixed"):
                         ib["sniff"] = True
-            idx = 0
-            while idx < len(rules) and isinstance(rules[idx], dict) and rules[idx].get("action") in ("sniff", "hijack-dns", "resolve"):
-                idx += 1
+            idx = _lead_idx(rules)
             rules.insert(idx, {"protocol": ["bittorrent"], **({"action": "route"} if new else {}), "outbound": direct})
         return apply_config(json.dumps(cfg), "apply")
+
+
+def _lead_idx(rules):
+    """Индекс, с которого идут обычные правила: перед ним служебные sniff / hijack-dns / resolve и правило «Xray напрямую»."""
+    i = 0
+    while i < len(rules) and isinstance(rules[i], dict) and (rules[i].get("action") in ("sniff", "hijack-dns", "resolve") or _is_xray_rule(rules[i])):
+        i += 1
+    return i
 
 
 def _is_lan_rule(r):
@@ -1734,9 +1738,7 @@ def _lan_first(rules):
     if not lan:
         return
     rest = [r for r in rules if not _is_lan_rule(r)]
-    i = 0
-    while i < len(rest) and isinstance(rest[i], dict) and rest[i].get("action") in ("sniff", "hijack-dns", "resolve"):
-        i += 1
+    i = _lead_idx(rest)
     rules[:] = rest[:i] + lan + rest[i:]
 
 
@@ -1785,9 +1787,7 @@ def presets_add(body: dict, user: str = Depends(auth)):
                     ex.update(tgt)
                 else:
                     fresh.append({f: list(pr[f]), **tgt})
-        idx = 0
-        while idx < len(rules) and isinstance(rules[idx], dict) and rules[idx].get("action") in ("sniff", "hijack-dns", "resolve"):
-            idx += 1
+        idx = _lead_idx(rules)
         rules[idx:idx] = fresh
         _lan_first(rules)
         return apply_config(json.dumps(cfg), "apply")
@@ -2383,7 +2383,7 @@ def xray_rule(cfg, want):
         cfg.setdefault("outbounds", []).append({"type": "direct", "tag": direct})
     new = (parse_ver(sb_version()) or (1, 12, 0)) >= (1, 11, 0)
     i = 0
-    while i < len(rules) and isinstance(rules[i], dict) and rules[i].get("action") in ("sniff", "hijack-dns", "resolve"):
+    while i < len(rules) and isinstance(rules[i], dict) and rules[i].get("action") == "sniff":
         i += 1
     rules.insert(i, {"process_name": ["xray"], **({"action": "route"} if new else {}), "outbound": direct})
 
