@@ -1,3 +1,6 @@
+## 2.5.4
+- Новый необязательный набор «Google по IP-адресам (push-сервисы, приложения)»: диапазоны Google (74.125.0.0/16, 142.250.0.0/15 и др.), чтобы мобильные приложения и push-канал (порт 5228), которые ходят по IP, шли тем же сервером, что и Gemini. По умолчанию ничего не добавляется
+
 ## 2.5.3
 - Набор «Gemini» дополнен доменами входа и интерфейса Google (accounts.google.com, ogs.google.com, play.google.com, www.google.com, apis.google.com, ssl.gstatic.com, csp.withgoogle.com и др.) и служебные API входа (oauth2, oauthaccountmanager, accountcapabilities-pa, growth-pa, notifications-pa, signaler-pa, robinfrontend-pa на googleapis.com): по журналу sing-box они уходили по маршруту «по умолчанию» через другой сервер, и Google, увидев вход и Gemini с разных адресов, писал про недоступный регион
 - Новый необязательный набор «Весь Google (вход, поиск, сервисы)»: ведёт google.com, googleapis.com, gstatic.com и родственные домены на тот же сервер, что и Gemini — если нужно, чтобы весь Google шёл одним путём. По умолчанию ничего не добавляется

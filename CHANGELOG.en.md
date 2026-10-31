@@ -1,3 +1,6 @@
+## 2.5.4
+- New optional set "Google by IP addresses (push services, apps)": Google ranges (74.125.0.0/16, 142.250.0.0/15, etc.) so that mobile apps and the push channel (port 5228), which connect by IP, take the same server as Gemini. Nothing is added by default
+
 ## 2.5.3
 - The "Gemini" set now includes Google sign-in and UI domains (accounts.google.com, ogs.google.com, play.google.com, www.google.com, apis.google.com, ssl.gstatic.com, csp.withgoogle.com, etc.) and sign-in service APIs (oauth2, oauthaccountmanager, accountcapabilities-pa, growth-pa, notifications-pa, signaler-pa, robinfrontend-pa on googleapis.com): according to the sing-box log they took the default route through a different server, and Google, seeing sign-in and Gemini from different addresses, reported an unavailable region
 - New optional set "All of Google (sign-in, search, services)": sends google.com, googleapis.com, gstatic.com and related domains to the same server as Gemini — if you need all of Google to take one path. Nothing is added by default
