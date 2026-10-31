@@ -1268,7 +1268,7 @@ function routeFields(out) {
 }
 function insertRules(list) {
   const rules = CFG.route.rules; let idx = 0;
-  while (idx < rules.length && ['sniff', 'hijack-dns', 'resolve'].includes(rules[idx].action)) idx++;
+  while (idx < rules.length && (['sniff', 'hijack-dns', 'resolve'].includes(rules[idx].action) || (Array.isArray(rules[idx].process_name) && rules[idx].process_name.length === 1 && rules[idx].process_name[0] === 'xray'))) idx++;
   rules.splice(idx, 0, ...list);
 }
 function presetAdd() {
@@ -1300,7 +1300,7 @@ function p2pLocal(on) {          // то же правило, что стави�
   const nr = route.rules;
   if (newStyle()) { if (!nr.some(r => r.action === 'sniff')) nr.unshift({action: 'sniff'}); }
   else (CFG.inbounds || []).forEach(i => { if (i.type === 'tun' || i.type === 'mixed') i.sniff = true; });
-  let idx = 0; while (idx < nr.length && ['sniff', 'hijack-dns', 'resolve'].includes(nr[idx].action)) idx++;
+  let idx = 0; while (idx < nr.length && (['sniff', 'hijack-dns', 'resolve'].includes(nr[idx].action) || (Array.isArray(nr[idx].process_name) && nr[idx].process_name[0] === 'xray'))) idx++;
   nr.splice(idx, 0, {protocol: ['bittorrent'], ...(newStyle() ? {action: 'route'} : {}), outbound: direct ? direct.tag : 'direct'});
 }
 function p2pToggle(on) {

@@ -1,3 +1,7 @@
+## 2.5.2
+- The "Gemini / AI Studio / NotebookLM" set now includes the domains without which Gemini reports an unavailable region when a specific server is chosen: Google sign-in and page resources (www.gstatic.com, fonts.gstatic.com, googleusercontent.com, fonts.googleapis.com, recaptcha.net, analytics.google.com, google.ru, clients6.google.com, voice input). Before, only Gemini's own domains went to the chosen server, while the rest took the default route from a different IP. All of google.com is NOT sent through the server. "ChatGPT / OpenAI / Claude" gained intercomcdn.com and intercom.io (support chat)
+- "Preset sets" and "BitTorrent direct" in the interface no longer insert rules above the "Xray direct" rule
+
 ## 2.5.1
 - Xray for XHTTP: the "Xray direct" rule now sits above the DNS hijack (hijack-dns), so Xray's own DNS queries do not go through sing-box and its proxy (otherwise, with a domain as the server address, a loop is possible: finding the XHTTP server requires the server itself). New route sets and the local network rule are no longer inserted above it. The rule is moved at the next subscription update
 
