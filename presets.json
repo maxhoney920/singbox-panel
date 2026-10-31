@@ -1,6 +1,6 @@
 {
   "_doc": "Готовые наборы маршрутизации singbox-panel. После правки увеличьте rev; прежние списки, которые меняете, перенесите в history[id][поле] — так панель узнает и обновит правила, созданные из них.",
-  "rev": 3,
+  "rev": 4,
   "presets": {
     "lan": {
       "t": "Локальные адреса (192.168.x.x, 10.x.x.x…)",
@@ -102,10 +102,95 @@
           "domain_suffix": [
             "openai.com",
             "chatgpt.com",
+            "chat.com",
+            "chatgpt.site",
             "oaistatic.com",
+            "oaistatsig.com",
             "oaiusercontent.com",
+            "openai.org",
+            "sora.com",
+            "crixet.com",
+            "openai.com.cdn.cloudflare.net",
+            "openaiapi-site.azureedge.net",
+            "openaiassets.blob.core.windows.net",
+            "openaicom-api-bdcpf8c6d2e9atf6.z01.azurefd.net",
+            "openaicom.imgix.net",
+            "openaicomproductionae4b.blob.core.windows.net",
+            "production-openaicom-storage.azureedge.net",
+            "chatgpt.livekit.cloud",
+            "host.livekit.cloud",
+            "turn.livekit.cloud",
             "anthropic.com",
-            "claude.ai"
+            "claude.ai",
+            "claude.com",
+            "claudeusercontent.com",
+            "clau.de",
+            "claude.app",
+            "claude.dev",
+            "claude.site",
+            "ant.dev",
+            "anthropic.team",
+            "servd-anthropic-website.b-cdn.net"
+          ]
+        }
+      ]
+    },
+    "gemini": {
+      "t": "Gemini / AI Studio / NotebookLM",
+      "t_en": "Gemini / AI Studio / NotebookLM",
+      "d": "proxy",
+      "r": [
+        {
+          "domain_suffix": [
+            "gemini.google.com",
+            "gemini.google",
+            "gemini.gstatic.com",
+            "geminiweb-pa.clients.google.com",
+            "geminiweb-pa.clients6.google.com",
+            "bard.google.com",
+            "generativelanguage.googleapis.com",
+            "geller-pa.googleapis.com",
+            "proactivebackend-pa.googleapis.com",
+            "robinfrontend-pa.googleapis.com",
+            "aistudio.google.com",
+            "ai.studio",
+            "ai.google.dev",
+            "makersuite.google.com",
+            "generativeai.google",
+            "alkalicore-pa.clients6.google.com",
+            "alkalimakersuite-pa.clients6.google.com",
+            "webchannel-alkalimakersuite-pa.clients6.google.com",
+            "appsgenaiserver-pa.clients.google.com",
+            "appsgenaiserver-pa.clients6.google.com",
+            "appsgenaiserver-pa.googleapis.com",
+            "cloudaicompanion.googleapis.com",
+            "cloudcode-pa.googleapis.com",
+            "daily-cloudcode-pa.googleapis.com",
+            "aicode.googleapis.com",
+            "aida.googleapis.com",
+            "notebooklm.google.com",
+            "notebooklm.google",
+            "notebook.google.com",
+            "notebook.google",
+            "notebooklm-pa.googleapis.com",
+            "notebooklm.googleapis.com",
+            "labstailwind.pa.googleapis.com",
+            "jules.google.com",
+            "jules.google",
+            "labs.google",
+            "labs.google.com",
+            "flow.google",
+            "flow.google.com",
+            "aisandbox-pa.googleapis.com",
+            "opal.google",
+            "opal.google.com",
+            "antigravity.google",
+            "antigravity-pa.googleapis.com",
+            "antigravity.googleapis.com",
+            "antigravity-unleash.goog",
+            "stitch.withgoogle.com",
+            "deepmind.google",
+            "deepmind.com"
           ]
         }
       ]
@@ -207,5 +292,18 @@
       ]
     }
   },
-  "history": {}
+  "history": {
+    "ai": {
+      "domain_suffix": [
+        [
+          "openai.com",
+          "chatgpt.com",
+          "oaistatic.com",
+          "oaiusercontent.com",
+          "anthropic.com",
+          "claude.ai"
+        ]
+      ]
+    }
+  }
 }
