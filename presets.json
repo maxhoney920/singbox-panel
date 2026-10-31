@@ -1,6 +1,6 @@
 {
   "_doc": "Готовые наборы маршрутизации singbox-panel. После правки увеличьте rev; прежние списки, которые меняете, перенесите в history[id][поле] — так панель узнает и обновит правила, созданные из них.",
-  "rev": 5,
+  "rev": 6,
   "presets": {
     "lan": {
       "t": "Локальные адреса (192.168.x.x, 10.x.x.x…)",
@@ -201,7 +201,45 @@
             "analytics.google.com",
             "google.ru",
             "clients6.google.com",
-            "speechs3proto2-pa.googleapis.com"
+            "speechs3proto2-pa.googleapis.com",
+            "accounts.google.com",
+            "ogs.google.com",
+            "play.google.com",
+            "www.google.com",
+            "apis.google.com",
+            "ssl.gstatic.com",
+            "csp.withgoogle.com",
+            "ogads-pa.googleapis.com",
+            "content-push.googleapis.com",
+            "oauth2.googleapis.com",
+            "oauthaccountmanager.googleapis.com",
+            "accountcapabilities-pa.googleapis.com",
+            "growth-pa.googleapis.com",
+            "notifications-pa.googleapis.com",
+            "signaler-pa.googleapis.com"
+          ]
+        }
+      ]
+    },
+    "google": {
+      "t": "Весь Google (вход, поиск, сервисы) — необязательный",
+      "t_en": "All of Google (sign-in, search, services) — optional",
+      "d": "proxy",
+      "r": [
+        {
+          "domain_suffix": [
+            "google.com",
+            "googleapis.com",
+            "gstatic.com",
+            "googleusercontent.com",
+            "ggpht.com",
+            "withgoogle.com",
+            "google-analytics.com",
+            "googletagmanager.com",
+            "googlesyndication.com",
+            "gvt1.com",
+            "gvt2.com",
+            "google.ru"
           ]
         }
       ]
@@ -401,6 +439,66 @@
           "stitch.withgoogle.com",
           "deepmind.google",
           "deepmind.com"
+        ],
+        [
+          "gemini.google.com",
+          "gemini.google",
+          "gemini.gstatic.com",
+          "geminiweb-pa.clients.google.com",
+          "geminiweb-pa.clients6.google.com",
+          "bard.google.com",
+          "generativelanguage.googleapis.com",
+          "geller-pa.googleapis.com",
+          "proactivebackend-pa.googleapis.com",
+          "robinfrontend-pa.googleapis.com",
+          "aistudio.google.com",
+          "ai.studio",
+          "ai.google.dev",
+          "makersuite.google.com",
+          "generativeai.google",
+          "alkalicore-pa.clients6.google.com",
+          "alkalimakersuite-pa.clients6.google.com",
+          "webchannel-alkalimakersuite-pa.clients6.google.com",
+          "appsgenaiserver-pa.clients.google.com",
+          "appsgenaiserver-pa.clients6.google.com",
+          "appsgenaiserver-pa.googleapis.com",
+          "cloudaicompanion.googleapis.com",
+          "cloudcode-pa.googleapis.com",
+          "daily-cloudcode-pa.googleapis.com",
+          "aicode.googleapis.com",
+          "aida.googleapis.com",
+          "notebooklm.google.com",
+          "notebooklm.google",
+          "notebook.google.com",
+          "notebook.google",
+          "notebooklm-pa.googleapis.com",
+          "notebooklm.googleapis.com",
+          "labstailwind.pa.googleapis.com",
+          "jules.google.com",
+          "jules.google",
+          "labs.google",
+          "labs.google.com",
+          "flow.google",
+          "flow.google.com",
+          "aisandbox-pa.googleapis.com",
+          "opal.google",
+          "opal.google.com",
+          "antigravity.google",
+          "antigravity-pa.googleapis.com",
+          "antigravity.googleapis.com",
+          "antigravity-unleash.goog",
+          "stitch.withgoogle.com",
+          "deepmind.google",
+          "deepmind.com",
+          "www.gstatic.com",
+          "fonts.gstatic.com",
+          "googleusercontent.com",
+          "fonts.googleapis.com",
+          "recaptcha.net",
+          "analytics.google.com",
+          "google.ru",
+          "clients6.google.com",
+          "speechs3proto2-pa.googleapis.com"
         ]
       ]
     }

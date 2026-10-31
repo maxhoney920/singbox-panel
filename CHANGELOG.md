@@ -1,3 +1,7 @@
+## 2.5.3
+- Набор «Gemini» дополнен доменами входа и интерфейса Google (accounts.google.com, ogs.google.com, play.google.com, www.google.com, apis.google.com, ssl.gstatic.com, csp.withgoogle.com и др.) и служебные API входа (oauth2, oauthaccountmanager, accountcapabilities-pa, growth-pa, notifications-pa, signaler-pa, robinfrontend-pa на googleapis.com): по журналу sing-box они уходили по маршруту «по умолчанию» через другой сервер, и Google, увидев вход и Gemini с разных адресов, писал про недоступный регион
+- Новый необязательный набор «Весь Google (вход, поиск, сервисы)»: ведёт google.com, googleapis.com, gstatic.com и родственные домены на тот же сервер, что и Gemini — если нужно, чтобы весь Google шёл одним путём. По умолчанию ничего не добавляется
+
 ## 2.5.2
 - Набор «Gemini / AI Studio / NotebookLM» дополнен доменами, без которых Gemini при отдельном сервере пишет про недоступный регион: вход и страница Google (www.gstatic.com, fonts.gstatic.com, googleusercontent.com, fonts.googleapis.com, recaptcha.net, analytics.google.com, google.ru, clients6.google.com, голосовой ввод). Раньше на выбранный сервер уходили только домены самого Gemini, а остальное — по маршруту «по умолчанию» с другого IP. Весь google.com через сервер не отправляется. В «ChatGPT / OpenAI / Claude» добавлены intercomcdn.com и intercom.io (чат поддержки)
 - «Готовые наборы» и «Только BitTorrent напрямую» в интерфейсе больше не вставляют правила выше правила «Xray напрямую»

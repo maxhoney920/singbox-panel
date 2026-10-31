@@ -1,3 +1,7 @@
+## 2.5.3
+- The "Gemini" set now includes Google sign-in and UI domains (accounts.google.com, ogs.google.com, play.google.com, www.google.com, apis.google.com, ssl.gstatic.com, csp.withgoogle.com, etc.) and sign-in service APIs (oauth2, oauthaccountmanager, accountcapabilities-pa, growth-pa, notifications-pa, signaler-pa, robinfrontend-pa on googleapis.com): according to the sing-box log they took the default route through a different server, and Google, seeing sign-in and Gemini from different addresses, reported an unavailable region
+- New optional set "All of Google (sign-in, search, services)": sends google.com, googleapis.com, gstatic.com and related domains to the same server as Gemini — if you need all of Google to take one path. Nothing is added by default
+
 ## 2.5.2
 - The "Gemini / AI Studio / NotebookLM" set now includes the domains without which Gemini reports an unavailable region when a specific server is chosen: Google sign-in and page resources (www.gstatic.com, fonts.gstatic.com, googleusercontent.com, fonts.googleapis.com, recaptcha.net, analytics.google.com, google.ru, clients6.google.com, voice input). Before, only Gemini's own domains went to the chosen server, while the rest took the default route from a different IP. All of google.com is NOT sent through the server. "ChatGPT / OpenAI / Claude" gained intercomcdn.com and intercom.io (support chat)
 - "Preset sets" and "BitTorrent direct" in the interface no longer insert rules above the "Xray direct" rule
