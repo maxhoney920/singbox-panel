@@ -1,3 +1,8 @@
+## 2.5.5
+- Fixed: Lampa and other Docker containers stopped opening while TUN was on. The TUN address 172.19.0.1/30 coincided with a Docker network address (172.19.0.1/16), and replies between docker-proxy and the container went into the tunnel
+- The panel now detects when the TUN address overlaps with the device's networks (Docker bridges, WireGuard, etc.), shows a warning in "Status" and offers a "Change the address to …" button. Nothing is changed automatically
+- A new TUN created from the panel gets a free subnet (198.18.0.1/30 or another), not the fixed 172.19.0.1/30
+
 ## 2.5.4
 - New optional set "Google by IP addresses (push services, apps)": Google ranges (74.125.0.0/16, 142.250.0.0/15, etc.) so that mobile apps and the push channel (port 5228), which connect by IP, take the same server as Gemini. Nothing is added by default
 

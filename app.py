@@ -21,6 +21,7 @@ import ctypes.util
 import grp
 import hashlib
 import inspect
+import ipaddress
 import json
 import os
 import platform
@@ -505,6 +506,77 @@ def has_tun():
 PRIVATE_NETS = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.0/8", "169.254.0.0/16"]
 
 
+TUN_ADDR_CANDIDATES = ["198.18.0.1/30", "100.127.255.1/30", "172.31.255.1/30", "192.0.0.1/30"]
+_tunc = {"t": 0.0, "v": None}
+
+
+def local_v4_nets():
+    """[(интерфейс, IPv4Interface)] всех адресов устройства (docker-мосты, wg, LAN)."""
+    rc, out = run(["ip", "-4", "-o", "addr", "show"], timeout=5)
+    res = []
+    if rc != 0:
+        return res
+    for line in out.splitlines():
+        p = line.split()
+        if len(p) >= 4 and p[2] == "inet":
+            try:
+                res.append((p[1].split("@")[0], ipaddress.ip_interface(p[3])))
+            except ValueError:
+                pass
+    return res
+
+
+def _tun_v4(ib):
+    """IPv4-адреса TUN-входа (address или inet4_address) как список IPv4Interface."""
+    raw = ib.get("address", ib.get("inet4_address", []))
+    out = []
+    for a in ([raw] if isinstance(raw, str) else raw if isinstance(raw, list) else []):
+        try:
+            x = ipaddress.ip_interface(str(a))
+            if x.version == 4:
+                out.append(x)
+        except ValueError:
+            pass
+    return out
+
+
+def tun_free_addr(nets=None):
+    """Первый адрес /30 для TUN, не пересекающийся ни с одной сетью устройства."""
+    nets = local_v4_nets() if nets is None else nets
+    for c in TUN_ADDR_CANDIDATES:
+        n = ipaddress.ip_interface(c).network
+        if not any(n.overlaps(x.network) for _, x in nets):
+            return c
+    return None
+
+
+def tun_conflict(cfg, nets=None):
+    """Адрес TUN пересекается с сетью другого интерфейса (например, docker-мост 172.19.0.0/16) —
+    тогда ответы контейнерам уходят в туннель. None, если конфликта нет."""
+    nets = local_v4_nets() if nets is None else nets
+    for ib in cfg.get("inbounds", []):
+        if not isinstance(ib, dict) or ib.get("type") != "tun":
+            continue
+        own = ib.get("interface_name")
+        for a in _tun_v4(ib):
+            for name, x in nets:
+                if name == own or name.startswith(("tun", "sing-tun")) and x.ip == a.ip and x.network == a.network:
+                    continue
+                if a.network.overlaps(x.network):
+                    return {"addr": str(a), "iface": name, "with": str(x), "suggest": tun_free_addr(nets)}
+    return None
+
+
+def tun_conflict_cached():
+    if time.time() - _tunc["t"] > 30:
+        try:
+            _tunc["v"] = tun_conflict(_cfg_read())
+        except (OSError, ValueError, AttributeError):
+            _tunc["v"] = None
+        _tunc["t"] = time.time()
+    return _tunc["v"]
+
+
 @app.post("/api/tun")
 def tun_toggle(body: dict, user: str = Depends(auth)):
     """Добавляет/убирает TUN-вход (по кнопке). Свои записи помечены тегом panel-tun."""
@@ -514,6 +586,23 @@ def tun_toggle(body: dict, user: str = Depends(auth)):
         except (OSError, ValueError) as e:
             return {"ok": False, "error": f"Не удалось прочитать конфиг: {e}"}
         ibs = cfg.setdefault("inbounds", [])
+        if body.get("action") == "fix_addr":
+            c = tun_conflict(cfg)
+            if not c:
+                return {"ok": True, "message": "Адрес TUN не пересекается с другими сетями"}
+            if not c["suggest"]:
+                return {"ok": False, "error": "Не нашёл свободную подсеть для TUN — задайте адрес вручную в конфиге"}
+            for ib in ibs:
+                if ib.get("type") != "tun":
+                    continue
+                key = "address" if "address" in ib else "inet4_address"
+                cur = ib.get(key)
+                if isinstance(cur, list):
+                    ib[key] = [c["suggest"] if (":" not in str(x)) else x for x in cur]
+                else:
+                    ib[key] = c["suggest"]
+            _tunc["t"] = 0.0
+            return apply_config(json.dumps(cfg), "apply")
         if not body.get("enable"):
             before = len(ibs)
             ibs[:] = [i for i in ibs if i.get("type") != "tun"]
@@ -524,10 +613,11 @@ def tun_toggle(body: dict, user: str = Depends(auth)):
             return {"ok": True, "message": "TUN уже настроен"}
         ver = parse_ver(sb_version()) or (1, 12, 0)
         tun = {"type": "tun", "tag": "panel-tun", "interface_name": "tun0", "auto_route": True, "stack": "mixed"}
+        taddr = tun_free_addr() or "172.19.0.1/30"      # не пересекаться с docker-мостами и т.п.
         if ver >= (1, 10, 0):
-            tun["address"] = ["172.19.0.1/30"]
+            tun["address"] = [taddr]
         else:
-            tun["inet4_address"] = "172.19.0.1/30"
+            tun["inet4_address"] = taddr
         ibs.insert(0, tun)
         route = cfg.setdefault("route", {})
         route["auto_detect_interface"] = True          # иначе исходящие sing-box зациклятся в собственный TUN
@@ -570,7 +660,7 @@ def status(user: str = Depends(auth)):
         "load_state": d.get("LoadState", ""),
         "pid": d.get("MainPID", "0"), "uptime": uptime, "memory": mem,
         "restarts": d.get("NRestarts", ""), "version": sb_version(),
-        "iface": iface, "iface_found": iface in net, "tun_configured": has_tun(), "src": src, "conns": conns, "rx": rx, "tx": tx, "ts": time.time(), "dev": dev,
+        "iface": iface, "iface_found": iface in net, "tun_configured": has_tun(), "tun_conflict": tun_conflict_cached(), "src": src, "conns": conns, "rx": rx, "tx": tx, "ts": time.time(), "dev": dev,
         "total": tot,
     }
 
