@@ -1,3 +1,6 @@
+## 2.5.8
+- The settings "Direct mode when stopped", "Xray for XHTTP" and "Services on this device through the proxy" moved from "Settings → Updates" to "Settings → Network": they concern network behaviour, not updates. The settings themselves work as before
+
 ## 2.5.7
 - Fixed: when a phone or PC uses "this device's address:1081" as its proxy, requests to services on the device itself that are published through Docker (for example Lampa on port 9118) returned 502. Cause: sing-box's direct outbound is bound to the network card, and Docker ports do not respond through such binding. The new optional setting "Services on this device through the proxy" (Settings → Updates; off by default) adds a separate direct outbound bound to loopback and a rule: requests to the device's own addresses go to 127.0.0.1. Other traffic is unchanged. Requires sing-box 1.11 or newer
 

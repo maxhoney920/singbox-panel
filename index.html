@@ -339,6 +339,26 @@ tr.node:hover{background:var(--hover)}tr.node.act{background:var(--acbg);box-sha
     <div class="mu" id="wa-info"></div>
     <div class="mu" style="margin-top:6px;font-size:12px">Без галочки панель слушает только 127.0.0.1: открыть её можно с самого сервера или через SSH-туннель <code>ssh -L 8088:127.0.0.1:8088 user@сервер</code>. Вернуть доступ из консоли: <code>sudo singbox-panel lan on</code>.</div>
   </div>
+
+  <div class="card" id="ls-card">
+    <div class="row" style="margin-top:0"><b>Службы этого устройства через прокси</b><span class="badge b-warn" id="ls-badge">выключено</span></div>
+    <div class="mu">Если на телефоне или ПК прокси указан как «адрес этого устройства:порт», запросы к сервисам самого устройства (например, Lampa в Docker) могут возвращать ошибку 502: sing-box привязывает соединения к сетевой карте, а опубликованные порты Docker через такую привязку не отвечают. Включение добавляет отдельный выход, привязанный к loopback, и правило: запросы к собственным адресам устройства идут на 127.0.0.1. Остальной трафик не меняется. Если адрес устройства изменится, нажмите «Обновить».</div>
+    <div id="ls-info" class="mu" style="margin-top:6px"></div>
+    <div class="row" id="ls-btns"></div>
+  </div>
+  <div class="card" id="fb-card">
+    <div class="row" style="margin-top:0"><b>Прямой режим при остановке</b><span class="badge b-warn" id="fb-badge">выключено</span></div>
+    <div class="mu">Если на устройствах сети прокси указан как «адрес этого устройства:порт» (SOCKS/HTTP), то при остановке sing-box порты закрываются и у них пропадает интернет. Здесь можно разрешить панели, пока sing-box остановлен, держать эти же порты и пропускать трафик напрямую, без VPN. При запуске sing-box порты возвращаются ему. Работает только для адресов из локальной сети; UDP через SOCKS не проходит.</div>
+    <div class="row"><label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="fb-on" onchange="fbSet(this.checked)"> <span>Пропускать трафик напрямую, пока sing-box остановлен</span></label></div>
+    <div id="fb-info" class="mu" style="margin-top:6px"></div>
+  </div>
+  <div class="card" id="xr-card">
+    <div class="row" style="margin-top:0"><b>Xray для XHTTP</b><span class="badge b-warn" id="xr-badge">выключено</span><span class="mu" id="xr-ver"></span></div>
+    <div class="mu">sing-box не умеет транспорт XHTTP. Если включить Xray, такие узлы подписки подключаются через него: в sing-box они выглядят как обычные узлы (с тем же именем), поэтому выбор сервера, резервный сервер, маршруты, TUN и шлюз работают как обычно. Xray ставится отдельной службой (<code>singbox-panel-xray</code>) и нужен только пока в подписках есть XHTTP-узлы. Всё — только по кнопкам.</div>
+    <div id="xr-info" style="margin:8px 0"></div>
+    <div id="xr-prog" class="prog" style="display:none"></div>
+    <div class="row" id="xr-btns"></div>
+  </div>
 </section>
 
 <!-- ================= СЕРВЕРЫ ================= -->
@@ -521,25 +541,6 @@ tr.node:hover{background:var(--hover)}tr.node.act{background:var(--acbg);box-sha
   <div class="card">
     <b>Резервные копии бинарника</b> <span class="mu">(последние 5)</span>
     <table class="stack"><tbody id="u-bk"></tbody></table>
-  </div>
-  <div class="card" id="ls-card">
-    <div class="row" style="margin-top:0"><b>Службы этого устройства через прокси</b><span class="badge b-warn" id="ls-badge">выключено</span></div>
-    <div class="mu">Если на телефоне или ПК прокси указан как «адрес этого устройства:порт», запросы к сервисам самого устройства (например, Lampa в Docker) могут возвращать ошибку 502: sing-box привязывает соединения к сетевой карте, а опубликованные порты Docker через такую привязку не отвечают. Включение добавляет отдельный выход, привязанный к loopback, и правило: запросы к собственным адресам устройства идут на 127.0.0.1. Остальной трафик не меняется. Если адрес устройства изменится, нажмите «Обновить».</div>
-    <div id="ls-info" class="mu" style="margin-top:6px"></div>
-    <div class="row" id="ls-btns"></div>
-  </div>
-  <div class="card" id="fb-card">
-    <div class="row" style="margin-top:0"><b>Прямой режим при остановке</b><span class="badge b-warn" id="fb-badge">выключено</span></div>
-    <div class="mu">Если на устройствах сети прокси указан как «адрес этого устройства:порт» (SOCKS/HTTP), то при остановке sing-box порты закрываются и у них пропадает интернет. Здесь можно разрешить панели, пока sing-box остановлен, держать эти же порты и пропускать трафик напрямую, без VPN. При запуске sing-box порты возвращаются ему. Работает только для адресов из локальной сети; UDP через SOCKS не проходит.</div>
-    <div class="row"><label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="fb-on" onchange="fbSet(this.checked)"> <span>Пропускать трафик напрямую, пока sing-box остановлен</span></label></div>
-    <div id="fb-info" class="mu" style="margin-top:6px"></div>
-  </div>
-  <div class="card" id="xr-card">
-    <div class="row" style="margin-top:0"><b>Xray для XHTTP</b><span class="badge b-warn" id="xr-badge">выключено</span><span class="mu" id="xr-ver"></span></div>
-    <div class="mu">sing-box не умеет транспорт XHTTP. Если включить Xray, такие узлы подписки подключаются через него: в sing-box они выглядят как обычные узлы (с тем же именем), поэтому выбор сервера, резервный сервер, маршруты, TUN и шлюз работают как обычно. Xray ставится отдельной службой (<code>singbox-panel-xray</code>) и нужен только пока в подписках есть XHTTP-узлы. Всё — только по кнопкам.</div>
-    <div id="xr-info" style="margin:8px 0"></div>
-    <div id="xr-prog" class="prog" style="display:none"></div>
-    <div class="row" id="xr-btns"></div>
   </div>
   <div class="card" id="os-card">
     <div class="row" style="margin-top:0"><b>Операционная система</b><span class="mu" id="os-name"></span></div>
@@ -958,7 +959,7 @@ async function sbpxOff() {
   if (!confirm('Убрать прокси из sing-box и перезапустить службу?')) return;
   report(await api('/api/sbproxy', {enable: false})); loadSbpx();
 }
-async function loadNet() { loadGateway(); loadDns(); loadSbpx(); loadWeb(); }
+async function loadNet() { loadGateway(); loadDns(); loadSbpx(); loadWeb(); loadLs(); loadFb(); loadXray(); }
 
 async function loadGateway() {
   const g = await api('/api/gateway'); if (!g.ok) return; GW = g;
@@ -1650,7 +1651,7 @@ async function puRollback(name) {
   if (report(j) && j.installing) puWait(j.installing);
 }
 async function loadUpdate(refresh) {
-  loadPU(); loadOS(); loadXray(); loadFb(); loadLs();
+  loadPU(); loadOS();
   if (refresh) toast('Запрашиваю список релизов…');
   const j = await api('/api/update/info' + (refresh ? '?refresh=1' : '')); if (!j.ok) return report(j);
   UPD = j; renderUpdate();
