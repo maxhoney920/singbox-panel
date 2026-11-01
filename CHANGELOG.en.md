@@ -1,3 +1,6 @@
+## 2.5.7
+- Fixed: when a phone or PC uses "this device's address:1081" as its proxy, requests to services on the device itself that are published through Docker (for example Lampa on port 9118) returned 502. Cause: sing-box's direct outbound is bound to the network card, and Docker ports do not respond through such binding. The new optional setting "Services on this device through the proxy" (Settings → Updates; off by default) adds a separate direct outbound bound to loopback and a rule: requests to the device's own addresses go to 127.0.0.1. Other traffic is unchanged. Requires sing-box 1.11 or newer
+
 ## 2.5.6
 - New optional setting "Direct mode when stopped" (Settings → Updates; off by default). If devices on the network use "this device's address:1080/1081" as their proxy, they used to lose internet when sing-box was stopped. Now, while sing-box is stopped, the panel holds the same ports (SOCKS5 and HTTP) and passes traffic directly; when sing-box starts, the ports go straight back to it. Local-network addresses only, UDP over SOCKS is not supported
 

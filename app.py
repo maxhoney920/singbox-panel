@@ -667,7 +667,7 @@ def status(user: str = Depends(auth)):
         "load_state": d.get("LoadState", ""),
         "pid": d.get("MainPID", "0"), "uptime": uptime, "memory": mem,
         "restarts": d.get("NRestarts", ""), "version": sb_version(),
-        "iface": iface, "iface_found": iface in net, "tun_configured": has_tun(), "tun_conflict": tun_conflict_cached(), "fallback": bool(FB["servers"]), "src": src, "conns": conns, "rx": rx, "tx": tx, "ts": time.time(), "dev": dev,
+        "iface": iface, "iface_found": iface in net, "tun_configured": has_tun(), "tun_conflict": tun_conflict_cached(), "fallback": bool(FB["servers"]), "localself": localself_cached(), "src": src, "conns": conns, "rx": rx, "tx": tx, "ts": time.time(), "dev": dev,
         "total": tot,
     }
 
@@ -2033,10 +2033,18 @@ def p2p_toggle(body: dict, user: str = Depends(auth)):
         return apply_config(json.dumps(cfg), "apply")
 
 
+SELF_TAG = "direct-local"
+
+
+def _is_self_rule(r):
+    """Правило «к собственным адресам устройства — через loopback» (см. localself_*)."""
+    return isinstance(r, dict) and r.get("outbound") == SELF_TAG and "ip_cidr" in r
+
+
 def _lead_idx(rules):
     """Индекс, с которого идут обычные правила: перед ним служебные sniff / hijack-dns / resolve и правило «Xray напрямую»."""
     i = 0
-    while i < len(rules) and isinstance(rules[i], dict) and (rules[i].get("action") in ("sniff", "hijack-dns", "resolve") or _is_xray_rule(rules[i])):
+    while i < len(rules) and isinstance(rules[i], dict) and (rules[i].get("action") in ("sniff", "hijack-dns", "resolve") or _is_xray_rule(rules[i]) or _is_self_rule(rules[i])):
         i += 1
     return i
 
@@ -2056,6 +2064,76 @@ def _lan_first(rules):
     rest = [r for r in rules if not _is_lan_rule(r)]
     i = _lead_idx(rest)
     rules[:] = rest[:i] + lan + rest[i:]
+
+
+# ------------------------------------------------- службы этого же устройства через прокси-порты (Docker, Lampa и т.п.)
+# direct-выход sing-box привязан к сетевой карте (auto_detect_interface), а опубликованные порты Docker
+# через такую привязку не отвечают (даже по 127.0.0.1) — клиент прокси получает 502. Запросы к собственным
+# адресам устройства уходят на 127.0.0.1 отдельным direct-выходом, привязанным к lo.
+_lsc = {"t": 0.0, "v": None}
+
+
+def localself_cidrs(nets=None):
+    nets = local_v4_nets() if nets is None else nets
+    ips = sorted({str(x.ip) + "/32" for n, x in nets if not n.startswith(("tun", "sing")) and n != "lo" and not str(x.ip).startswith("127.")})
+    return ips + ["127.0.0.0/8"]
+
+
+def localself_view(cfg, nets=None):
+    ver = parse_ver(sb_version()) or (1, 12, 0)
+    rule = next((r for r in (cfg.get("route") or {}).get("rules", []) if _is_self_rule(r)), None)
+    v = {"supported": ver >= (1, 11, 0), "enabled": bool(rule), "stale": False}
+    if rule:
+        v["stale"] = set(rule.get("ip_cidr") or []) != set(localself_cidrs(nets))
+    return v
+
+
+def localself_cached():
+    if time.time() - _lsc["t"] > 30:
+        try:
+            _lsc["v"] = localself_view(_cfg_read())
+        except (OSError, ValueError, AttributeError):
+            _lsc["v"] = None
+        _lsc["t"] = time.time()
+    return _lsc["v"]
+
+
+@app.get("/api/localself")
+def localself_get(user: str = Depends(auth)):
+    try:
+        v = localself_view(_cfg_read())
+    except (OSError, ValueError) as e:
+        return {"ok": False, "error": f"Не удалось прочитать конфиг: {e}"}
+    return {"ok": True, **v, "cidrs": localself_cidrs()}
+
+
+@app.post("/api/localself")
+def localself_set(body: dict, user: str = Depends(auth)):
+    with LOCK:
+        try:
+            cfg = _cfg_read()
+        except (OSError, ValueError) as e:
+            return {"ok": False, "error": f"Не удалось прочитать конфиг: {e}"}
+        if (parse_ver(sb_version()) or (1, 12, 0)) < (1, 11, 0):
+            return {"ok": False, "error": "Нужен sing-box 1.11 или новее"}
+        route = cfg.setdefault("route", {})
+        rules = route.setdefault("rules", [])
+        rules[:] = [r for r in rules if not _is_self_rule(r)]
+        outs = cfg.setdefault("outbounds", [])
+        if body.get("enable"):
+            if not any(o.get("tag") == SELF_TAG for o in outs):
+                outs.append({"type": "direct", "tag": SELF_TAG, "bind_interface": "lo"})
+            rules.insert(_lead_idx(rules), {"ip_cidr": localself_cidrs(), "action": "route", "outbound": SELF_TAG, "override_address": "127.0.0.1"})
+            msg = "Запросы к службам этого устройства пойдут через loopback"
+        else:
+            if not any(r.get("outbound") == SELF_TAG for r in rules if isinstance(r, dict)):
+                outs[:] = [o for o in outs if o.get("tag") != SELF_TAG]
+            msg = "Правило для служб этого устройства убрано"
+        _lsc["t"] = 0.0
+        res = apply_config(json.dumps(cfg), "apply")
+    if isinstance(res, dict) and res.get("ok") and not res.get("message"):
+        res["message"] = msg
+    return res
 
 
 @app.get("/api/presets")
