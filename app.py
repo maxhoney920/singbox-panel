@@ -31,6 +31,8 @@ import re
 import secrets
 import shlex
 import shutil
+import socket
+import socketserver
 import subprocess
 import sys
 import tarfile
@@ -276,6 +278,11 @@ ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 
 
 def run(cmd, timeout=30, cwd=None):
+    if len(cmd) >= 3 and cmd[0] == "systemctl" and cmd[1] in ("start", "restart", "reload-or-restart", "try-restart") and cmd[2] == SERVICE:
+        try:
+            fb_release()                      # прямой режим держит прокси-порты sing-box — освободить до запуска
+        except NameError:
+            pass
     try:
         p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, cwd=cwd)
         return p.returncode, ANSI_RE.sub("", (p.stdout + p.stderr)).strip()      # без цветовых кодов (sing-box красит FATAL)
@@ -660,7 +667,7 @@ def status(user: str = Depends(auth)):
         "load_state": d.get("LoadState", ""),
         "pid": d.get("MainPID", "0"), "uptime": uptime, "memory": mem,
         "restarts": d.get("NRestarts", ""), "version": sb_version(),
-        "iface": iface, "iface_found": iface in net, "tun_configured": has_tun(), "tun_conflict": tun_conflict_cached(), "src": src, "conns": conns, "rx": rx, "tx": tx, "ts": time.time(), "dev": dev,
+        "iface": iface, "iface_found": iface in net, "tun_configured": has_tun(), "tun_conflict": tun_conflict_cached(), "fallback": bool(FB["servers"]), "src": src, "conns": conns, "rx": rx, "tx": tx, "ts": time.time(), "dev": dev,
         "total": tot,
     }
 
@@ -758,6 +765,222 @@ def traffic_reset(body: dict, user: str = Depends(auth)):
         _traffic.update(rx=0, tx=0, since=int(time.time()))
         _traffic_save()
     return {"ok": True, "message": "Счётчик трафика за всё время обнулён"}
+
+
+# ------------------------------------------------- прямой режим: пока sing-box остановлен, прокси-порты не закрываются
+# Клиенты, у которых в настройках стоит прокси «адрес устройства:1080/1081», при остановке sing-box остаются без интернета.
+# Если включено (по умолчанию выключено), панель сама держит эти порты и пропускает трафик напрямую, без VPN.
+FB = {"servers": [], "ports": [], "conns": set(), "inactive": 0, "t0": time.time()}
+FB_LOCK = threading.Lock()
+
+
+def fb_ports():
+    """[(host, port)] прокси-входов sing-box (socks/http/mixed) из конфига."""
+    res = []
+    try:
+        for ib in _cfg_read().get("inbounds", []):
+            if ib.get("type") in ("socks", "http", "mixed") and isinstance(ib.get("listen_port"), int):
+                res.append((str(ib.get("listen") or "0.0.0.0"), ib["listen_port"]))
+    except (OSError, ValueError, AttributeError):
+        pass
+    return res
+
+
+def _fb_pipe(a, b):
+    try:
+        while True:
+            d = a.recv(65536)
+            if not d:
+                break
+            b.sendall(d)
+    except OSError:
+        pass
+    finally:
+        for x in (a, b):
+            try:
+                x.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+
+
+def _fb_relay(c, r, early=b""):
+    if early:
+        r.sendall(early)
+    t = threading.Thread(target=_fb_pipe, args=(r, c), daemon=True)
+    t.start()
+    _fb_pipe(c, r)
+    t.join(5)
+
+
+def _fb_recv(c, n):
+    buf = b""
+    while len(buf) < n:
+        d = c.recv(n - len(buf))
+        if not d:
+            raise OSError("eof")
+        buf += d
+    return buf
+
+
+def fb_handle(c, addr):
+    r = None
+    try:
+        try:
+            if not ipaddress.ip_address(addr[0]).is_private:      # только из локальной сети
+                return
+        except ValueError:
+            return
+        c.settimeout(20)
+        first = c.recv(1, socket.MSG_PEEK)
+        if not first:
+            return
+        if first == b"\x05":                                       # SOCKS5, без авторизации, только CONNECT
+            _fb_recv(c, 1)
+            n = _fb_recv(c, 1)[0]
+            _fb_recv(c, n)
+            c.sendall(b"\x05\x00")
+            ver, cmd, _, at = _fb_recv(c, 4)
+            if cmd != 1:
+                c.sendall(b"\x05\x07\x00\x01\x00\x00\x00\x00\x00\x00")
+                return
+            if at == 1:
+                host = socket.inet_ntoa(_fb_recv(c, 4))
+            elif at == 3:
+                host = _fb_recv(c, _fb_recv(c, 1)[0]).decode("idna")
+            elif at == 4:
+                host = socket.inet_ntop(socket.AF_INET6, _fb_recv(c, 16))
+            else:
+                return
+            port = int.from_bytes(_fb_recv(c, 2), "big")
+            try:
+                r = socket.create_connection((host, port), timeout=10)
+            except OSError:
+                c.sendall(b"\x05\x05\x00\x01\x00\x00\x00\x00\x00\x00")
+                return
+            c.sendall(b"\x05\x00\x00\x01\x00\x00\x00\x00\x00\x00")
+            c.settimeout(None); r.settimeout(None)
+            _fb_relay(c, r)
+            return
+        buf = b""                                                  # HTTP-прокси
+        while b"\r\n\r\n" not in buf and len(buf) < 65536:
+            d = c.recv(4096)
+            if not d:
+                return
+            buf += d
+        head, _, rest = buf.partition(b"\r\n\r\n")
+        lines = head.decode("latin-1").split("\r\n")
+        m = lines[0].split(" ")
+        if len(m) != 3:
+            return
+        meth, target, ver = m
+        if meth.upper() == "CONNECT":
+            host, _, port = target.rpartition(":")
+            r = socket.create_connection((host.strip("[]"), int(port or 443)), timeout=10)
+            c.sendall(b"HTTP/1.1 200 Connection established\r\n\r\n")
+            c.settimeout(None); r.settimeout(None)
+            _fb_relay(c, r, rest)
+            return
+        u = urllib.parse.urlsplit(target)
+        if u.scheme != "http" or not u.hostname:
+            c.sendall(b"HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n")
+            return
+        r = socket.create_connection((u.hostname, u.port or 80), timeout=10)
+        path = (u.path or "/") + ("?" + u.query if u.query else "")
+        hdr = [f"{meth} {path} {ver}"] + [l for l in lines[1:] if not l.lower().startswith(("proxy-connection:", "connection:"))] + ["Connection: close"]
+        c.settimeout(None); r.settimeout(None)
+        _fb_relay(c, r, ("\r\n".join(hdr) + "\r\n\r\n").encode("latin-1") + rest)
+    except (OSError, ValueError, UnicodeError):
+        pass
+    finally:
+        for x in (c, r):
+            try:
+                if x:
+                    x.close()
+            except OSError:
+                pass
+        FB["conns"].discard(c)
+
+
+class _FbServer(socketserver.ThreadingTCPServer):
+    allow_reuse_address = True
+    daemon_threads = True
+    address_family = socket.AF_INET
+
+    def process_request(self, request, client_address):
+        FB["conns"].add(request)
+        super().process_request(request, client_address)
+
+    def finish_request(self, request, client_address):
+        fb_handle(request, client_address)
+
+
+def fb_start():
+    """Занимает прокси-порты sing-box. Возвращает список реально занятых."""
+    with FB_LOCK:
+        if FB["servers"]:
+            return FB["ports"]
+        got = []
+        for host, port in fb_ports():
+            try:
+                srv = _FbServer((host if ":" not in host else "0.0.0.0", port), socketserver.BaseRequestHandler)
+            except OSError:
+                continue
+            threading.Thread(target=srv.serve_forever, kwargs={"poll_interval": 0.5}, daemon=True).start()
+            FB["servers"].append(srv); got.append(port)
+        FB["ports"] = got
+        return got
+
+
+def fb_release():
+    """Освобождает порты (перед запуском sing-box)."""
+    with FB_LOCK:
+        srvs, FB["servers"], FB["ports"] = FB["servers"], [], []
+        for srv in srvs:
+            try:
+                srv.shutdown(); srv.server_close()
+            except OSError:
+                pass
+        for c in list(FB["conns"]):
+            try:
+                c.close()
+            except OSError:
+                pass
+        FB["conns"].clear()
+
+
+def fb_loop():
+    while True:
+        time.sleep(2)
+        try:
+            want = bool(load_state().get("direct_fallback"))
+            rc, out = run(["systemctl", "show", SERVICE, "-p", "ActiveState"], timeout=10)
+            state = out.split("=", 1)[-1].strip()
+            if want and state in ("inactive", "failed") and time.time() - FB["t0"] > 20:
+                FB["inactive"] += 1                       # два подряд опроса: не перехватываем порт при загрузке системы
+                if FB["inactive"] >= 2:
+                    fb_start()
+            else:
+                FB["inactive"] = 0
+                if FB["servers"]:
+                    fb_release()
+        except Exception:
+            pass
+
+
+@app.get("/api/fallback")
+def fallback_get(user: str = Depends(auth)):
+    return {"ok": True, "enabled": bool(load_state().get("direct_fallback")), "active": bool(FB["servers"]), "ports": FB["ports"] or [p for _, p in fb_ports()]}
+
+
+@app.post("/api/fallback")
+def fallback_set(body: dict, user: str = Depends(auth)):
+    with LOCK:
+        st = load_state()
+        st["direct_fallback"] = bool(body.get("enable"))
+        save_state(st)
+    if not st["direct_fallback"]:
+        fb_release()
+    return {"ok": True, "message": "Прямой режим при остановке включён" if st["direct_fallback"] else "Прямой режим при остановке выключен"}
 
 
 @app.post("/api/service")
@@ -1585,6 +1808,7 @@ def _startup():
     threading.Thread(target=watch_code, daemon=True).start()
     threading.Thread(target=pu_loop, daemon=True).start()
     threading.Thread(target=fo_loop, daemon=True).start()
+    threading.Thread(target=fb_loop, daemon=True).start()
     threading.Thread(target=traffic_loop, daemon=True).start()
     threading.Thread(target=presets_loop, daemon=True).start()
     threading.Thread(target=badge_loop, daemon=True).start()

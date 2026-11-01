@@ -1,3 +1,6 @@
+## 2.5.6
+- New optional setting "Direct mode when stopped" (Settings → Updates; off by default). If devices on the network use "this device's address:1080/1081" as their proxy, they used to lose internet when sing-box was stopped. Now, while sing-box is stopped, the panel holds the same ports (SOCKS5 and HTTP) and passes traffic directly; when sing-box starts, the ports go straight back to it. Local-network addresses only, UDP over SOCKS is not supported
+
 ## 2.5.5
 - Fixed: Lampa and other Docker containers stopped opening while TUN was on. The TUN address 172.19.0.1/30 coincided with a Docker network address (172.19.0.1/16), and replies between docker-proxy and the container went into the tunnel
 - The panel now detects when the TUN address overlaps with the device's networks (Docker bridges, WireGuard, etc.), shows a warning in "Status" and offers a "Change the address to …" button. Nothing is changed automatically
