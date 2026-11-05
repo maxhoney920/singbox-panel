@@ -1,3 +1,6 @@
+## 2.6.2
+- Minor interface improvements.
+
 ## 2.6.1
 - The top menu (Status, Servers, …) is now exactly centred in the window on wide screens (1200 px and up); logo on the left, language/theme/log out on the right. Narrow and mobile layouts are unchanged.
 - Clicking the logo and the "sing-box Panel" title opens the Status tab (keyboard works too).
