@@ -983,6 +983,122 @@ def fallback_set(body: dict, user: str = Depends(auth)):
     return {"ok": True, "message": "Прямой режим при остановке включён" if st["direct_fallback"] else "Прямой режим при остановке выключен"}
 
 
+# ------------------------------------------- перезапуск sing-box при нехватке ОЗУ
+MW_DEF = {"enabled": False, "threshold": 85}
+MW = {"hits": 0, "last_try": 0.0, "skipped": "", "used": None, "sb": None}
+MW_SAMPLES, MW_COOLDOWN, MW_SHARE = 3, 600, 10        # подряд замеров; пауза между перезапусками, с; доля sing-box от ОЗУ, %
+
+
+def mw_cfg(st=None):
+    c = dict(MW_DEF)
+    c.update((st if st is not None else load_state()).get("memwd") or {})
+    try:
+        c["threshold"] = max(50, min(95, int(c["threshold"])))
+    except (TypeError, ValueError):
+        c["threshold"] = MW_DEF["threshold"]
+    c["enabled"] = bool(c["enabled"])
+    return c
+
+
+def mw_used_pct(m):
+    tot = m.get("MemTotal") or 0
+    if tot <= 0:
+        return None
+    return 100.0 * (tot - m.get("MemAvailable", m.get("MemFree", 0))) / tot
+
+
+def mw_decide(cfg, used, sb, total, now):
+    """Чистая функция решения. Возвращает 'restart' | 'wait' | 'skip' | 'ok'; меняет счётчик MW."""
+    if not cfg["enabled"] or used is None:
+        MW["hits"] = 0
+        MW["skipped"] = ""
+        return "ok"
+    if used < cfg["threshold"]:
+        MW["hits"] = 0
+        MW["skipped"] = ""
+        return "ok"
+    MW["hits"] += 1
+    if MW["hits"] < MW_SAMPLES:
+        return "wait"
+    if now - MW["last_try"] < MW_COOLDOWN:
+        return "wait"
+    if sb is None or total <= 0 or 100.0 * sb / total < MW_SHARE:
+        MW["skipped"] = "память занята не sing-box: перезапуск не поможет"
+        return "skip"
+    MW["skipped"] = ""
+    return "restart"
+
+
+def mw_step(now=None):
+    now = time.time() if now is None else now
+    cfg = mw_cfg()
+    m = read_meminfo()
+    used = mw_used_pct(m)
+    rc, out = run(["systemctl", "show", SERVICE, "-p", "ActiveState,MemoryCurrent"], timeout=10)
+    d = dict(l.split("=", 1) for l in out.splitlines() if "=" in l)
+    sb = int(d["MemoryCurrent"]) if d.get("MemoryCurrent", "").isdigit() and int(d["MemoryCurrent"]) < 2 ** 60 else None
+    MW["used"], MW["sb"] = used, sb
+    if d.get("ActiveState") != "active":
+        MW["hits"] = 0
+        return "ok"
+    act = mw_decide(cfg, used, sb, m.get("MemTotal", 0), now)
+    if act == "restart":
+        MW["last_try"] = now
+        MW["hits"] = 0
+        rc, out = run(["systemctl", "restart", SERVICE], timeout=60)
+        with LOCK:
+            st = load_state()
+            st.setdefault("memwd", {})["last"] = {"t": now, "used": round(used, 1), "sb": sb, "ok": rc == 0}
+            save_state(st)
+    return act
+
+
+def mw_loop():
+    while True:
+        time.sleep(20)
+        try:
+            mw_step()
+        except Exception:
+            pass
+
+
+def mw_view():
+    st = load_state()
+    cfg = mw_cfg(st)
+    try:
+        m = read_meminfo()
+        total, used = m["MemTotal"], mw_used_pct(m)
+    except (OSError, KeyError, ValueError):
+        total, used = 0, None
+    return {"ok": True, **cfg, "total": total, "used_pct": None if used is None else round(used, 1),
+            "sb": MW["sb"], "skipped": MW["skipped"], "last": (st.get("memwd") or {}).get("last"),
+            "samples": MW_SAMPLES, "cooldown": MW_COOLDOWN, "share": MW_SHARE}
+
+
+@app.get("/api/memwd")
+def memwd_get(user: str = Depends(auth)):
+    return mw_view()
+
+
+@app.post("/api/memwd")
+def memwd_set(body: dict, user: str = Depends(auth)):
+    try:
+        th = int(body.get("threshold", MW_DEF["threshold"]))
+    except (TypeError, ValueError):
+        raise HTTPException(400, "Порог должен быть числом")
+    if not 50 <= th <= 95:
+        raise HTTPException(400, "Порог должен быть от 50 до 95 %")
+    with LOCK:
+        st = load_state()
+        w = st.setdefault("memwd", {})
+        w["enabled"] = bool(body.get("enabled"))
+        w["threshold"] = th
+        save_state(st)
+    MW["hits"] = 0
+    MW["skipped"] = ""
+    return {**mw_view(), "message": ("Автоперезапуск при нехватке ОЗУ включён (порог %d %%)" % th) if body.get("enabled") else "Автоперезапуск при нехватке ОЗУ выключен"}
+
+
 @app.post("/api/service")
 def service(body: dict, user: str = Depends(auth)):
     action = body.get("action")
@@ -1812,6 +1928,7 @@ def _startup():
     threading.Thread(target=traffic_loop, daemon=True).start()
     threading.Thread(target=presets_loop, daemon=True).start()
     threading.Thread(target=badge_loop, daemon=True).start()
+    threading.Thread(target=mw_loop, daemon=True).start()
     threading.Thread(target=lambda: (time.sleep(5), migrate_presets(auto=True)), daemon=True).start()
 
 
@@ -3095,6 +3212,14 @@ def xray_install(upgrade=False):
     return rel["version"]
 
 
+def _ram_brief():
+    try:
+        m = read_meminfo()
+        return {"total": m["MemTotal"], "avail": m.get("MemAvailable", m.get("MemFree", 0))}
+    except (OSError, KeyError, ValueError):
+        return None
+
+
 def xray_view():
     st = load_state()
     xs = st.get("xray") or {}
@@ -3105,7 +3230,7 @@ def xray_view():
             "active": xray_active() if path else False, "nodes": len(xs.get("nodes") or {}),
             "arch_ok": platform.machine().lower() in XRAY_ARCHES, "arch": platform.machine(),
             "latest": (lat or {}).get("version", ""), "newer": bool(lat and ver and _verkey(lat["version"]) > _verkey(ver)),
-            "unit": os.path.isfile(_xray_unit_path()), "error": _xr["error"]}
+            "unit": os.path.isfile(_xray_unit_path()), "error": _xr["error"], "ram": _ram_brief()}
 
 
 def _xray_refresh_subs():

@@ -1,3 +1,8 @@
+## 2.6.0
+- Servers tab: the selection dots are gone. The current server is already marked by the highlighted row with an accent bar on the left and a bold name.
+- Settings → Server: new "Auto-restart on low RAM" card. The panel detects the device's RAM size and shows how much is used. When enabled (OFF by default), if usage stays at or above the threshold (85 % by default, 50–95 % allowed) for three samples in a row (≈1 minute) and sing-box holds at least 10 % of RAM, the panel restarts sing-box. At most once per 10 minutes; if the memory is used by something else, no restart happens and the card says so. The time and load of the last auto-restart are saved.
+- Xray for XHTTP: added a warning that Xray is a separate process that needs additional RAM (≈30 MB idle as measured on x86_64; more under load and possibly on ARM). The warning is shown in the card and in the enable confirmation, together with the device's available RAM.
+
 ## 2.5.12
 - "Chocolate4U ru-direct": the `geosite-ru` and `geoip-ru` lists are now removed individually. Previously, if at least one of them was used by another rule (for example a DNS rule with `rule_set: geosite-ru`), both stayed and the card hung in "partially configured" forever. Now only the one that is really needed stays, and an orphaned one (declared but unused — sing-box still downloads it on every start) is removed by the "Remove leftovers" button. The card says which lists are unused
 - A list needed only by someone else's rule or by DNS is no longer treated as a leftover and no longer gets in the way
