@@ -2136,6 +2136,139 @@ def localself_set(body: dict, user: str = Depends(auth)):
     return res
 
 
+# ------------------------------------------------- списки «Россия напрямую» (rule_set geosite-ru / geoip-ru)
+# Без cache_file sing-box НЕ ЗАПУСКАЕТСЯ, если удалённые списки не скачались (при каждом перезапуске),
+# поэтому кнопка всегда включает кэш, а запуск после применения проверяется отдельно, с откатом.
+RU_RS_BASE = "https://raw.githubusercontent.com/Chocolate4U/Iran-sing-box-rules/rule-set/"
+RU_RS = {"geosite-ru": RU_RS_BASE + "geosite-category-ru.srs", "geoip-ru": RU_RS_BASE + "geoip-ru.srs"}
+
+
+def _is_rs_rule(r):
+    return (isinstance(r, dict) and set(r) - {"action"} == {"rule_set", "outbound"}
+            and isinstance(r["rule_set"], list) and set(r["rule_set"]) == set(RU_RS))
+
+
+def rs_detour(cfg):
+    """Через какой выход скачивать списки: «proxy» или итоговый выход маршрута; нет прокси — напрямую."""
+    tags = {o.get("tag"): o for o in cfg.get("outbounds") or [] if isinstance(o, dict)}
+    for t in ("proxy", (cfg.get("route") or {}).get("final")):
+        if t in tags and tags[t].get("type") not in ("direct", "block", "dns"):
+            return t
+    return None
+
+
+def rs_entry(tag, cfg, ver):
+    e = {"tag": tag, "type": "remote", "format": "binary", "url": RU_RS[tag], "update_interval": "1d"}
+    d = rs_detour(cfg)
+    if d:
+        if ver >= (1, 14, 0):
+            e["http_client"] = {"detour": d}          # download_detour в 1.14 устарел
+        else:
+            e["download_detour"] = d
+    return e
+
+
+def rs_view(cfg):
+    ver = parse_ver(sb_version()) or (1, 12, 0)
+    route = cfg.get("route") or {}
+    have = {r.get("tag") for r in route.get("rule_set") or [] if isinstance(r, dict)}
+    rule = any(_is_rs_rule(r) for r in route.get("rules") or [])
+    on = rule and set(RU_RS) <= have
+    cf = (cfg.get("experimental") or {}).get("cache_file")
+    return {"supported": ver >= (1, 8, 0), "enabled": on, "partial": (rule or bool(set(RU_RS) & have)) and not on,
+            "cache": bool(isinstance(cf, dict) and cf.get("enabled")), "detour": rs_detour(cfg)}
+
+
+def rs_enable(cfg, ver):
+    route = cfg.setdefault("route", {})
+    sets = route.setdefault("rule_set", [])
+    have = {r.get("tag") for r in sets if isinstance(r, dict)}
+    for tag in RU_RS:
+        if tag not in have:
+            sets.append(rs_entry(tag, cfg, ver))
+    outs = cfg.setdefault("outbounds", [])
+    direct = next((o["tag"] for o in outs if isinstance(o, dict) and o.get("type") == "direct" and o.get("tag") and o["tag"] != SELF_TAG), None)
+    if not direct:
+        direct = "direct"
+        outs.append({"type": "direct", "tag": direct})
+    rules = route.setdefault("rules", [])
+    if not any(_is_rs_rule(r) for r in rules):               # в конец: наборы и ваши правила выше имеют приоритет
+        rules.append({"rule_set": ["geoip-ru", "geosite-ru"], **({"action": "route"} if ver >= (1, 11, 0) else {}), "outbound": direct})
+    exp = cfg.setdefault("experimental", {})
+    if not isinstance(exp.get("cache_file"), dict):
+        exp["cache_file"] = {}
+    exp["cache_file"]["enabled"] = True
+
+
+def rs_disable(cfg):
+    """None — убрано; строка — почему нельзя."""
+    route = cfg.get("route") or {}
+    rules = route.get("rules") or []
+    other = [r for r in rules if not _is_rs_rule(r)] + list((cfg.get("dns") or {}).get("rules") or [])
+    if any(t in json.dumps(r, ensure_ascii=False) for r in other for t in RU_RS):
+        return "Теги geosite-ru / geoip-ru используются другими правилами (в маршрутах или DNS) — сначала уберите их там"
+    rules[:] = [r for r in rules if not _is_rs_rule(r)]
+    if "rule_set" in route:
+        route["rule_set"] = [x for x in route["rule_set"] if not (isinstance(x, dict) and x.get("tag") in RU_RS and x.get("url") == RU_RS[x["tag"]])]
+        if not route["rule_set"]:
+            del route["rule_set"]
+    return None
+
+
+def sb_wait_started(since, timeout=45):
+    """Ждёт, пока sing-box после перезапуска пройдёт загрузку списков: 'ok' (запущен) или 'fail' (упал)."""
+    t0, st = time.time(), ""
+    while time.time() - t0 < timeout:
+        time.sleep(1)
+        st = run(["systemctl", "show", SERVICE, "-p", "ActiveState"], timeout=10)[1].split("=", 1)[-1].strip()
+        if st not in ("active", "activating"):
+            return "fail"
+        log = run(["journalctl", "-u", SERVICE, "--since", f"@{int(since)}", "--no-pager", "-o", "cat"], timeout=15)[1]
+        if "FATAL" in log:
+            return "fail"
+        if "sing-box started" in log:
+            return "ok"
+    return "ok" if st == "active" else "fail"
+
+
+@app.get("/api/ruleset")
+def ruleset_get(user: str = Depends(auth)):
+    try:
+        return {"ok": True, **rs_view(_cfg_read())}
+    except (OSError, ValueError) as e:
+        return {"ok": False, "error": f"Не удалось прочитать конфиг: {e}"}
+
+
+@app.post("/api/ruleset")
+def ruleset_set(body: dict, user: str = Depends(auth)):
+    enable = bool(body.get("enable"))
+    with LOCK:
+        try:
+            cfg = _cfg_read()
+            old_text = open(CONFIG, encoding="utf-8").read()
+        except (OSError, ValueError) as e:
+            return {"ok": False, "error": f"Не удалось прочитать конфиг: {e}"}
+        ver = parse_ver(sb_version()) or (1, 12, 0)
+        if ver < (1, 8, 0):
+            return {"ok": False, "error": "Нужен sing-box 1.8 или новее"}
+        if enable:
+            rs_enable(cfg, ver)
+        else:
+            why = rs_disable(cfg)
+            if why:
+                return {"ok": False, "error": why}
+        t0 = time.time()
+        res = apply_config(json.dumps(cfg), "apply")
+    if not isinstance(res, dict) or not res.get("ok"):
+        return res
+    if enable and sb_wait_started(t0) != "ok":
+        tail = run(["journalctl", "-u", SERVICE, "-n", "12", "--no-pager", "-o", "cat"])[1]
+        with LOCK:
+            apply_config(old_text, "apply")
+        return {"ok": False, "error": "sing-box не запустился: не скачались списки (проверьте, что сервер «proxy» работает и GitHub доступен через него). Прежний конфиг восстановлен.\n\n" + tail}
+    return {"ok": True, "message": "Списки России включены: российские домены и адреса идут напрямую" if enable else "Списки России убраны"}
+
+
 @app.get("/api/presets")
 def presets_list(user: str = Depends(auth)):
     return {"ok": True, "presets": PRESETS, "history": PRESET_HISTORY, "rev": PRESET_REV, **_presets}

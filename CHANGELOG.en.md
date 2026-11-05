@@ -1,3 +1,7 @@
+## 2.5.9
+- New button "Russian lists direct (geosite-ru, geoip-ru)" on the "Routing" tab (nothing is added by default). It adds two ready-made rule_sets (Russian domains and Russian IP addresses) to the config and a "they → direct" rule at the end of the rule list: presets and your own rules above it take priority. sing-box downloads the lists itself from GitHub (Chocolate4U/Iran-sing-box-rules) through the "proxy" server and refreshes them daily; on sing-box 1.14 and newer `http_client` is used instead of the deprecated `download_detour`
+- The button always enables the sing-box cache (`cache_file`): without it sing-box fails to start on every restart if the lists could not be downloaded. After applying, the panel separately checks that sing-box got through the list download; if not, the previous config is restored. If such lists are already in the config, the button recognises them and duplicates nothing. "Disable" removes the lists and the rule but leaves the cache alone, and refuses if the tags are used by other rules or DNS
+
 ## 2.5.8
 - The settings "Direct mode when stopped", "Xray for XHTTP" and "Services on this device through the proxy" moved from "Settings → Updates" to "Settings → Network": they concern network behaviour, not updates. The settings themselves work as before
 
