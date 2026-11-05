@@ -2196,15 +2196,22 @@ def rs_other_ru(cfg):
     return [(i, r) for i, r in enumerate((cfg.get("route") or {}).get("rules") or []) if _ru_pure(r, direct)]
 
 
+def _rs_used(cfg):
+    """Какие из наших тегов используют другие правила (маршруты и DNS), кроме самого правила ru-direct."""
+    others = [r for r in (cfg.get("route") or {}).get("rules") or [] if not _is_rs_rule(r)] + list((cfg.get("dns") or {}).get("rules") or [])
+    return {t for t in RU_RS if any(f'"{t}"' in json.dumps(r, ensure_ascii=False) for r in others)}
+
+
 def rs_view(cfg):
     ver = parse_ver(sb_version()) or (1, 12, 0)
     route = cfg.get("route") or {}
-    have = {r.get("tag") for r in route.get("rule_set") or [] if isinstance(r, dict)}
+    have = {r.get("tag") for r in route.get("rule_set") or [] if isinstance(r, dict)} & set(RU_RS)
     rule = any(_is_rs_rule(r) for r in route.get("rules") or [])
-    on = rule and set(RU_RS) <= have
+    on = rule and have == set(RU_RS)
+    orphan = have - _rs_used(cfg)                 # объявлены, но ни одно правило не использует — остатки
     cf = (cfg.get("experimental") or {}).get("cache_file")
-    return {"supported": ver >= (1, 8, 0), "enabled": on, "partial": (rule or bool(set(RU_RS) & have)) and not on,
-            "cache": bool(isinstance(cf, dict) and cf.get("enabled")), "detour": rs_detour(cfg),
+    return {"supported": ver >= (1, 8, 0), "enabled": on, "partial": (rule and not on) or (not rule and bool(orphan)),
+            "orphans": sorted(orphan) if not rule else [], "cache": bool(isinstance(cf, dict) and cf.get("enabled")), "detour": rs_detour(cfg),
             "remove": [{"i": i, "rule": json.dumps(r, ensure_ascii=False)} for i, r in rs_other_ru(cfg)],
             "saved": sum(len(b) for b in load_state().get("rs_removed") or [])}
 
@@ -2244,20 +2251,18 @@ def rs_restore(cfg, batches):
 
 
 def rs_disable(cfg, batches=None):
-    """Убирает правило ru-direct, возвращает убранные при включении правила и снимает списки, если они больше никому не нужны.
-    Возвращает True, если списки оставлены (их используют другие правила — свои или возвращённые)."""
+    """Убирает правило ru-direct, возвращает убранные при включении правила и снимает каждый список, который больше никому не нужен.
+    Возвращает True, если какой-то список оставлен (его используют другие правила — свои, DNS или возвращённые)."""
     route = cfg.setdefault("route", {})
     rules = route.setdefault("rules", [])
     rules[:] = [r for r in rules if not _is_rs_rule(r)]
     rs_restore(cfg, batches)
-    others = list(route.get("rules") or []) + list((cfg.get("dns") or {}).get("rules") or [])
-    if any(f'"{t}"' in json.dumps(r, ensure_ascii=False) for r in others for t in RU_RS):
-        return True
+    used = _rs_used(cfg)
     if "rule_set" in route:
-        route["rule_set"] = [x for x in route["rule_set"] if not (isinstance(x, dict) and x.get("tag") in RU_RS and x.get("url") == RU_RS[x["tag"]])]
+        route["rule_set"] = [x for x in route["rule_set"] if not (isinstance(x, dict) and x.get("tag") in RU_RS and x["tag"] not in used and x.get("url") == RU_RS[x["tag"]])]
         if not route["rule_set"]:
             del route["rule_set"]
-    return False
+    return bool(used)
 
 
 def sb_wait_started(since, timeout=45):

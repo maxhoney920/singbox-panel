@@ -1,3 +1,7 @@
+## 2.5.12
+- "Chocolate4U ru-direct": the `geosite-ru` and `geoip-ru` lists are now removed individually. Previously, if at least one of them was used by another rule (for example a DNS rule with `rule_set: geosite-ru`), both stayed and the card hung in "partially configured" forever. Now only the one that is really needed stays, and an orphaned one (declared but unused — sing-box still downloads it on every start) is removed by the "Remove leftovers" button. The card says which lists are unused
+- A list needed only by someone else's rule or by DNS is no longer treated as a leftover and no longer gets in the way
+
 ## 2.5.11
 - "Chocolate4U ru-direct": if the rule was removed by hand but the `geosite-ru`/`geoip-ru` lists remain ("partially configured" state), the card now has a "Remove leftovers" button and a note that sing-box downloads declared lists on every start even when no rule uses them (without the cache, with GitHub unreachable the service will not start). Previously this state offered only "Complete and enable"
 - Fixed: on disable, a rule that was already put back by hand is not duplicated
