@@ -1,3 +1,7 @@
+## 2.5.11
+- "Chocolate4U ru-direct": if the rule was removed by hand but the `geosite-ru`/`geoip-ru` lists remain ("partially configured" state), the card now has a "Remove leftovers" button and a note that sing-box downloads declared lists on every start even when no rule uses them (without the cache, with GitHub unreachable the service will not start). Previously this state offered only "Complete and enable"
+- Fixed: on disable, a rule that was already put back by hand is not duplicated
+
 ## 2.5.10
 - The Russian lists are now a separate optional set "Chocolate4U ru-direct" (Routing tab). Until you enable it, the config and your existing rules work as before. When enabled, the set removes the other "Russian" rules that go direct and are fully covered by these lists: the "Russian domains (.ru, .su, .рф)" preset, old geoip/geosite rules for ru and separate rules that use only the geosite-ru/geoip-ru tags. Rules with other conditions (for example `ru` together with another domain, a port, a different outbound) and DNS rules are not touched. The confirmation window shows the exact list of rules to be removed before enabling
 - On disable the removed rules return to their places, and the geosite-ru/geoip-ru lists are dropped only if no rule uses them any more (otherwise they stay). If new redundant Russian rules appear, an enabled set offers a "Remove redundant rules" button. Fixed: restored rules that refer to the list tags no longer leave the config with undefined tags

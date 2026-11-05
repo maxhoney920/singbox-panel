@@ -2239,7 +2239,8 @@ def rs_restore(cfg, batches):
     rules = cfg.setdefault("route", {}).setdefault("rules", [])
     for batch in reversed(batches or []):
         for item in sorted(batch, key=lambda x: x["i"]):
-            rules.insert(min(item["i"], len(rules)), item["rule"])
+            if item["rule"] not in rules:                 # правило могли вернуть вручную — не дублируем
+                rules.insert(min(item["i"], len(rules)), item["rule"])
 
 
 def rs_disable(cfg, batches=None):
