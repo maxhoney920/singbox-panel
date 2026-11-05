@@ -1,3 +1,7 @@
+## 2.6.1
+- The top menu (Status, Servers, …) is now exactly centred in the window on wide screens (1200 px and up); logo on the left, language/theme/log out on the right. Narrow and mobile layouts are unchanged.
+- Clicking the logo and the "sing-box Panel" title opens the Status tab (keyboard works too).
+
 ## 2.6.0
 - Servers tab: the selection dots are gone. The current server is already marked by the highlighted row with an accent bar on the left and a bold name.
 - Settings → Server: new "Auto-restart on low RAM" card. The panel detects the device's RAM size and shows how much is used. When enabled (OFF by default), if usage stays at or above the threshold (85 % by default, 50–95 % allowed) for three samples in a row (≈1 minute) and sing-box holds at least 10 % of RAM, the panel restarts sing-box. At most once per 10 minutes; if the memory is used by something else, no restart happens and the card says so. The time and load of the last auto-restart are saved.
