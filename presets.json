@@ -1,6 +1,6 @@
 {
   "_doc": "Готовые наборы маршрутизации singbox-panel. После правки увеличьте rev; прежние списки, которые меняете, перенесите в history[id][поле] — так панель узнает и обновит правила, созданные из них.",
-  "rev": 7,
+  "rev": 8,
   "presets": {
     "lan": {
       "t": "Локальные адреса (192.168.x.x, 10.x.x.x…)",
@@ -356,6 +356,21 @@
             "redditstatic.com",
             "reddituploads.com",
             "redditinc.com"
+          ]
+        }
+      ]
+    },
+    "kimi": {
+      "t": "Kimi (Moonshot AI)",
+      "t_en": "Kimi (Moonshot AI)",
+      "d": "proxy",
+      "r": [
+        {
+          "domain_suffix": [
+            "kimi.ai",
+            "kimi.com",
+            "moonshot.ai",
+            "moonshot.cn"
           ]
         }
       ]
