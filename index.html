@@ -2203,7 +2203,7 @@ async function init() {
   const me = await api('/api/me').catch(() => null); if (!me || !me.ok) return;
   $('#who').textContent = me.user;
   try { const t = localStorage.getItem('sbp-tab'); if (t && t !== 'status' && document.getElementById('tab-' + t)) showTab(t); } catch (e) {}
-  pollStatus(); pollNow(); loadHealth(); loadSubHome(); loadBadges(); api('/api/panelupdate', {action: 'visit'}).then(() => { setTimeout(loadBadges, 8000); setTimeout(loadBadges, 25000); }).catch(() => {}); timers.push(setInterval(loadBadges, 60000)); timers.push(setInterval(() => { if (TAB === 'status') loadSubHome(); }, 300000)); timers.push(setInterval(() => { if (TAB === 'status') pollNow(); }, 10000)); timers.push(setInterval(pollStatus, 2000)); timers.push(setInterval(() => { if (TAB === 'nodes') loadFo(); }, 10000)); timers.push(setInterval(loadHealth, 60000));
+  pollStatus(); pollNow(); loadHealth(); loadSubHome(); loadBadges(); api('/api/panelupdate', {action: 'visit'}).then(() => loadBadges()).catch(() => {}); timers.push(setInterval(loadBadges, 60000)); timers.push(setInterval(() => { if (TAB === 'status') loadSubHome(); }, 300000)); timers.push(setInterval(() => { if (TAB === 'status') pollNow(); }, 10000)); timers.push(setInterval(pollStatus, 2000)); timers.push(setInterval(() => { if (TAB === 'nodes') loadFo(); }, 10000)); timers.push(setInterval(loadHealth, 60000));
   timers.push(setInterval(() => { if (TAB === 'logs' && $('#lg-auto').checked) loadLogs(); }, 3000));
 }
 init();

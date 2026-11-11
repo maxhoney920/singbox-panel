@@ -5140,9 +5140,8 @@ def pu_fresh(lt):
             "notes": [n for n in lt.get("notes") or [] if APP_VERSION != "dev" and _verkey(n.get("version", "")) > cur]}
 
 
-PU_VISIT_MIN = 600                                 # проверка при входе в панель — не чаще, чем раз в 10 минут
+PU_VISIT_MIN = 60                                  # проверка при входе в панель — не чаще раза в минуту (запрос маленький)
 _pu_visit_lock = threading.Lock()
-_pu_visit_busy = [False]
 
 
 def pu_loop():
@@ -5461,20 +5460,12 @@ def panelupdate_set(body: dict, user: str = Depends(auth)):
         if not ok:
             return {**v, "ok": False, "error": _pu["error"]}
         return {**v, "message": ("Доступна версия " + _pu["latest"]["version"]) if _pu["latest"]["newer"] else "Установлена последняя версия"}
-    if act == "visit":                       # вход в веб-интерфейс: проверка (не чаще раза в 10 минут), ничего не устанавливается
+    if act == "visit":                       # вход в веб-интерфейс: проверка сразу (не чаще раза в минуту), ничего не устанавливается
         with _pu_visit_lock:
-            go = time.time() - _pu["checked"] >= PU_VISIT_MIN and not _pu_visit_busy[0]
+            go = time.time() - _pu["checked"] >= PU_VISIT_MIN or (bool(_pu["error"]) and time.time() - _pu["checked"] >= 15)
             if go:
-                _pu_visit_busy[0] = True
-
-        def _run():
-            try:
                 pu_check()
-            finally:
-                _pu_visit_busy[0] = False
-        if go:
-            threading.Thread(target=_run, daemon=True).start()
-        return {"ok": True, "started": go, "checked": _pu["checked"]}
+        return {"ok": True, "started": go, "checked": _pu["checked"], "error": _pu["error"]}
     if act in ("install", "rollback"):
         if not shutil.which("dpkg"):
             return {"ok": False, "error": "В системе нет dpkg — обновите панель вручную тем же способом, которым ставили"}
