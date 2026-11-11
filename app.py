@@ -1933,7 +1933,7 @@ def _startup():
 
 
 # ------------------------------------------------- готовые наборы маршрутизации
-PRESET_REV = 7           # увеличивайте при изменении списков; прежние списки добавляйте в PRESET_HISTORY
+PRESET_REV = 8           # увеличивайте при изменении списков; прежние списки добавляйте в PRESET_HISTORY
 PRESETS = {
     "lan": {"t": "Локальные адреса (192.168.x.x, 10.x.x.x…)", "d": "direct",
             "r": [{"ip_cidr": ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.0/8"]}]},
@@ -1947,6 +1947,7 @@ PRESETS = {
     "ai": {"t": "ChatGPT / OpenAI / Claude", "d": "proxy", "r": [{"domain_suffix": ["openai.com", "chatgpt.com", "chat.com", "chatgpt.site", "oaistatic.com", "oaistatsig.com", "oaiusercontent.com", "openai.org", "sora.com", "crixet.com", "openai.com.cdn.cloudflare.net", "openaiapi-site.azureedge.net", "openaiassets.blob.core.windows.net", "openaicom-api-bdcpf8c6d2e9atf6.z01.azurefd.net", "openaicom.imgix.net", "openaicomproductionae4b.blob.core.windows.net", "production-openaicom-storage.azureedge.net", "chatgpt.livekit.cloud", "host.livekit.cloud", "turn.livekit.cloud", "anthropic.com", "claude.ai", "claude.com", "claudeusercontent.com", "clau.de", "claude.app", "claude.dev", "claude.site", "ant.dev", "anthropic.team", "servd-anthropic-website.b-cdn.net", "intercomcdn.com", "intercom.io"]}]},
     "gemini": {"t": "Gemini / AI Studio / NotebookLM", "d": "proxy", "r": [{"domain_suffix": ["gemini.google.com", "gemini.google", "gemini.gstatic.com", "geminiweb-pa.clients.google.com", "geminiweb-pa.clients6.google.com", "bard.google.com", "generativelanguage.googleapis.com", "geller-pa.googleapis.com", "proactivebackend-pa.googleapis.com", "robinfrontend-pa.googleapis.com", "aistudio.google.com", "ai.studio", "ai.google.dev", "makersuite.google.com", "generativeai.google", "alkalicore-pa.clients6.google.com", "alkalimakersuite-pa.clients6.google.com", "webchannel-alkalimakersuite-pa.clients6.google.com", "appsgenaiserver-pa.clients.google.com", "appsgenaiserver-pa.clients6.google.com", "appsgenaiserver-pa.googleapis.com", "cloudaicompanion.googleapis.com", "cloudcode-pa.googleapis.com", "daily-cloudcode-pa.googleapis.com", "aicode.googleapis.com", "aida.googleapis.com", "notebooklm.google.com", "notebooklm.google", "notebook.google.com", "notebook.google", "notebooklm-pa.googleapis.com", "notebooklm.googleapis.com", "labstailwind.pa.googleapis.com", "jules.google.com", "jules.google", "labs.google", "labs.google.com", "flow.google", "flow.google.com", "aisandbox-pa.googleapis.com", "opal.google", "opal.google.com", "antigravity.google", "antigravity-pa.googleapis.com", "antigravity.googleapis.com", "antigravity-unleash.goog", "stitch.withgoogle.com", "deepmind.google", "deepmind.com", "www.gstatic.com", "fonts.gstatic.com", "googleusercontent.com", "fonts.googleapis.com", "recaptcha.net", "analytics.google.com", "google.ru", "clients6.google.com", "speechs3proto2-pa.googleapis.com", "accounts.google.com", "ogs.google.com", "play.google.com", "www.google.com", "apis.google.com", "ssl.gstatic.com", "csp.withgoogle.com", "ogads-pa.googleapis.com", "content-push.googleapis.com", "oauth2.googleapis.com", "oauthaccountmanager.googleapis.com", "accountcapabilities-pa.googleapis.com", "growth-pa.googleapis.com", "notifications-pa.googleapis.com", "signaler-pa.googleapis.com"]}]},
     "google": {"t": "Весь Google (вход, поиск, сервисы) — необязательный", "d": "proxy", "r": [{"domain_suffix": ["google.com", "googleapis.com", "gstatic.com", "googleusercontent.com", "ggpht.com", "withgoogle.com", "google-analytics.com", "googletagmanager.com", "googlesyndication.com", "gvt1.com", "gvt2.com", "google.ru"]}]},
+    "kimi": {"t": "Kimi (Moonshot AI)", "d": "proxy", "r": [{"domain_suffix": ["kimi.ai", "kimi.com", "moonshot.ai", "moonshot.cn"]}]},
     "google_ip": {"t": "Google по IP-адресам (push-сервисы, приложения) — необязательный", "d": "proxy", "r": [{"ip_cidr": ["74.125.0.0/16", "64.233.160.0/19", "108.177.0.0/17", "142.250.0.0/15", "172.217.0.0/16", "172.253.0.0/16", "173.194.0.0/16", "209.85.128.0/17", "216.58.192.0/19"]}]},
     "discord": {"t": "Discord", "d": "proxy", "r": [{"domain_suffix": [
         "discord.com", "discord.gg", "discordapp.com", "discordapp.net", "discord.media"]}]},
@@ -5139,6 +5140,11 @@ def pu_fresh(lt):
             "notes": [n for n in lt.get("notes") or [] if APP_VERSION != "dev" and _verkey(n.get("version", "")) > cur]}
 
 
+PU_VISIT_MIN = 600                                 # проверка при входе в панель — не чаще, чем раз в 10 минут
+_pu_visit_lock = threading.Lock()
+_pu_visit_busy = [False]
+
+
 def pu_loop():
     saved = load_state().get("pu") or {}
     _pu.update(latest=pu_fresh(saved.get("latest")), checked=saved.get("checked", 0), error=saved.get("error", ""))
@@ -5455,6 +5461,20 @@ def panelupdate_set(body: dict, user: str = Depends(auth)):
         if not ok:
             return {**v, "ok": False, "error": _pu["error"]}
         return {**v, "message": ("Доступна версия " + _pu["latest"]["version"]) if _pu["latest"]["newer"] else "Установлена последняя версия"}
+    if act == "visit":                       # вход в веб-интерфейс: проверка (не чаще раза в 10 минут), ничего не устанавливается
+        with _pu_visit_lock:
+            go = time.time() - _pu["checked"] >= PU_VISIT_MIN and not _pu_visit_busy[0]
+            if go:
+                _pu_visit_busy[0] = True
+
+        def _run():
+            try:
+                pu_check()
+            finally:
+                _pu_visit_busy[0] = False
+        if go:
+            threading.Thread(target=_run, daemon=True).start()
+        return {"ok": True, "started": go, "checked": _pu["checked"]}
     if act in ("install", "rollback"):
         if not shutil.which("dpkg"):
             return {"ok": False, "error": "В системе нет dpkg — обновите панель вручную тем же способом, которым ставили"}

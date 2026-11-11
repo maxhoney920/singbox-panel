@@ -1,3 +1,8 @@
+## 2.7.0
+- The panel checks for updates when you open the web interface (at most once every 10 minutes; nothing is installed without your consent).
+- A "Updates available" message with a "Go to installation" button is shown above the connection status; it can be closed with the cross and returns only when a new version appears.
+- Built-in preset lists are synchronised with the repository (version 8, the "Kimi (Moonshot AI)" preset).
+
 ## 2.6.2
 - Minor interface improvements.
 
