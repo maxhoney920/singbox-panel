@@ -1,3 +1,6 @@
+## 2.7.1
+- Test update with no changes: checking the panel update mechanism.
+
 ## 2.7.0
 - The panel checks for updates when you open the web interface (at most once every 10 minutes; nothing is installed without your consent).
 - A "Updates available" message with a "Go to installation" button is shown above the connection status; it can be closed with the cross and returns only when a new version appears.
