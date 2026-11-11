@@ -1,3 +1,6 @@
+## 2.7.3
+- Test update with no changes: checking the update message on sign-in.
+
 ## 2.7.2
 - The "update available" message now appears right after you sign in: the check on sign-in runs immediately (at most once a minute) instead of waiting for the timer. The 2-hour check timer is kept.
 
