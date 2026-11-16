@@ -1416,6 +1416,23 @@ def parse_subscription(raw):
     return nodes, bad
 
 
+def xhttp_extra(sub, nodes, st):
+    """Сервер подписки на User-Agent sing-box отдаёт готовый JSON и молча пропускает узлы XHTTP (sing-box их не умеет).
+    Если Xray включён, подписка запрашивается ещё раз в виде ссылок, и узлы XHTTP добавляются к списку.
+    Только при включённом Xray и без своего User-Agent; ошибки второго запроса не мешают обновлению."""
+    xs = st.get("xray") or {}
+    if (sub.get("ua") or "").strip() or any("_xhttp" in n for n in nodes) or not xs.get("enabled") or not xray_find():
+        return nodes
+    for ua in FALLBACK_UAS:
+        try:
+            more, _ = parse_subscription(fetch(sub["url"], ua))
+        except Exception:
+            continue
+        if more:
+            return nodes + [n for n in more if "_xhttp" in n]
+    return nodes
+
+
 def finalize(nodes, prefix=PREFIX):
     seen, out = set(), []
     for n in nodes:
@@ -1604,6 +1621,7 @@ def update_subscriptions(sids=None, restart=True, dry=False, auto=False):
                     raise ValueError("URL подписки не задан")
                 else:
                     nodes, bad = fetch_nodes(sub)
+                    nodes = xhttp_extra(sub, nodes, st)
                 nodes = finalize(nodes, sub["prefix"])
                 if not nodes:
                     raise ValueError("В подписке не найдено ни одного поддерживаемого узла")
