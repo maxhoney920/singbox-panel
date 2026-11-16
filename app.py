@@ -1746,7 +1746,9 @@ def get_subs(user: str = Depends(auth)):
         cfg = _cfg_read()
     except (OSError, ValueError):
         cfg = None
-    return {"ok": True, "subs": _sub_view(load_state(), cfg)}
+    st = load_state()
+    return {"ok": True, "subs": _sub_view(st, cfg),
+            "xray": {"installed": bool(xray_find()), "enabled": bool((st.get("xray") or {}).get("enabled"))}}
 
 
 def _legacy_sub(st):
@@ -2974,7 +2976,7 @@ XRAY_ARCHES = {"x86_64": "64", "amd64": "64", "aarch64": "arm64-v8a", "arm64": "
 XRAY_PORT0 = 20800
 XRAY_MARK = "installed by singbox-panel"
 XHTTP_NEED = ("Узел использует транспорт XHTTP, который sing-box не поддерживает. "
-              "Включите Xray: Настройки → Обновления → «Xray для XHTTP»")
+              "Включите Xray: Настройки → Сеть → «Xray для XHTTP»")
 _xr = {"latest": None, "t": 0.0, "error": ""}
 XRAY_LOCK = threading.Lock()
 

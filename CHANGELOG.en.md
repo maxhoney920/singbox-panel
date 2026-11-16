@@ -1,3 +1,7 @@
+## 2.7.5
+- The Subscriptions section and the "Xray for XHTTP" card now warn that until Xray is installed and enabled, XHTTP nodes from subscriptions will not be shown. The warning links straight to the Xray card.
+- Fixed the hint on rejected nodes: the Xray card is under Settings → Network.
+
 ## 2.7.4
 - Fixed: when a subscription had both regular nodes (e.g. VLESS TLS) and XHTTP nodes, the XHTTP ones did not show up. The subscription server answers a sing-box request with a ready list that omits XHTTP. With Xray enabled, the panel now also requests the subscription as links and adds the XHTTP nodes. With Xray off or a custom User-Agent set for the subscription, no second request is made.
 
