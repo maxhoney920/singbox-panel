@@ -983,6 +983,62 @@ def fallback_set(body: dict, user: str = Depends(auth)):
     return {"ok": True, "message": "Прямой режим при остановке включён" if st["direct_fallback"] else "Прямой режим при остановке выключен"}
 
 
+# ------------------------------------------- внешний IP устройства (определяется автоматически при открытии панели)
+IPSVC = [("https://ipwho.is/", "ipwho"), ("https://api.ipify.org?format=json", "ipify")]
+EXITIP = {"ip": "", "country": "", "cc": "", "t": 0.0, "error": "", "via": ""}
+EXITIP_LOCK = threading.Lock()
+EXITIP_MIN = 5                                       # не чаще раза в 5 секунд
+
+
+def exitip_fetch(url, kind):
+    op = urllib.request.build_opener(urllib.request.ProxyHandler({}))      # как обычный трафик устройства (через TUN, если он включён)
+    op.addheaders = [("User-Agent", "singbox-panel/" + APP_VERSION), ("Accept", "application/json")]
+    with op.open(url, timeout=7) as r:
+        d = json.loads(r.read(20000).decode("utf-8", "replace"))
+    ip = str(d.get("ip") or "").strip()
+    ipaddress.ip_address(ip)                                               # ValueError, если пришло что-то другое
+    if kind == "ipwho" and d.get("success") is False:
+        raise ValueError(str(d.get("message") or "отказ сервиса"))
+    return ip, str(d.get("country") or "") if kind == "ipwho" else "", str(d.get("country_code") or "") if kind == "ipwho" else ""
+
+
+def exitip_check():
+    with EXITIP_LOCK:
+        if time.time() - EXITIP["t"] < EXITIP_MIN and EXITIP["ip"]:
+            return
+        errs = []
+        for url, kind in IPSVC:
+            try:
+                ip, country, cc = exitip_fetch(url, kind)
+                EXITIP.update(ip=ip, country=country, cc=cc, t=time.time(), error="", via=kind)
+                return
+            except (OSError, ValueError) as e:
+                errs.append(f"{kind}: {e}")
+        EXITIP.update(t=time.time(), error="Не удалось определить IP: " + "; ".join(errs)[:200])
+
+
+def exitip_view():
+    return {"ok": True, **EXITIP}
+
+
+@app.get("/api/exitip")
+def exitip_get(user: str = Depends(auth)):
+    return exitip_view()
+
+
+@app.post("/api/exitip")
+def exitip_post(body: dict, user: str = Depends(auth)):
+    act = body.get("action")
+    if act != "check":
+        raise HTTPException(400, "Неизвестное действие")
+    exitip_check()
+    v = exitip_view()
+    if v["error"] and not v["ip"]:
+        v["ok"] = False
+        v["message"] = v["error"]
+    return v
+
+
 # ------------------------------------------- перезапуск sing-box при нехватке ОЗУ
 MW_DEF = {"enabled": False, "threshold": 85}
 MW = {"hits": 0, "last_try": 0.0, "skipped": "", "used": None, "sb": None}

@@ -1,3 +1,6 @@
+## 2.8.0
+- The connection status shows the device's external IP and country. It is detected automatically when the panel opens, after a server switch and every 5 minutes while the Status tab is open; no buttons to press (clicking the address re-detects it). The panel queries ipwho.is (fallback: api.ipify.org); the request goes out as ordinary device traffic, i.e. through the VPN when it is on.
+
 ## 2.7.5
 - The Subscriptions section and the "Xray for XHTTP" card now warn that until Xray is installed and enabled, XHTTP nodes from subscriptions will not be shown. The warning links straight to the Xray card.
 - Fixed the hint on rejected nodes: the Xray card is under Settings → Network.
