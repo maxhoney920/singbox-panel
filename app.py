@@ -2238,7 +2238,7 @@ def _is_self_rule(r):
 def _lead_idx(rules):
     """Индекс, с которого идут обычные правила: перед ним служебные sniff / hijack-dns / resolve и правило «Xray напрямую»."""
     i = 0
-    while i < len(rules) and isinstance(rules[i], dict) and (rules[i].get("action") in ("sniff", "hijack-dns", "resolve") or _is_xray_rule(rules[i]) or _is_self_rule(rules[i])):
+    while i < len(rules) and isinstance(rules[i], dict) and (rules[i].get("action") in ("sniff", "hijack-dns", "resolve") or _is_xray_rule(rules[i]) or _is_self_rule(rules[i]) or _is_block_rule(rules[i])):
         i += 1
     return i
 
@@ -2351,8 +2351,8 @@ def rs_detour(cfg):
     return None
 
 
-def rs_entry(tag, cfg, ver):
-    e = {"tag": tag, "type": "remote", "format": "binary", "url": RU_RS[tag], "update_interval": "1d"}
+def rs_entry(tag, cfg, ver, url=None):
+    e = {"tag": tag, "type": "remote", "format": "binary", "url": url or RU_RS[tag], "update_interval": "1d"}
     d = rs_detour(cfg)
     if d:
         if ver >= (1, 14, 0):
@@ -2521,6 +2521,173 @@ def ruleset_set(body: dict, user: str = Depends(auth)):
         msg = "Chocolate4U ru-direct включён: российские домены и адреса идут напрямую" + (f". Убрано других российских правил: {len(removed)}" if removed else "")
     else:
         msg = "Chocolate4U ru-direct убран" + (f". Возвращено правил: {sum(len(b) for b in batches)}" if batches else "") + (". Списки оставлены: их используют другие правила" if kept else "")
+    return {"ok": True, "message": msg}
+
+
+# ------------------------------------------- блокировка рекламы и выбранных сайтов (только по кнопкам)
+BLK_ADS_TAG = "ads-block"
+BLK_ADS_URL = "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-category-ads-all.srs"
+BLK_MAX = 1000
+_BLK_HOST = re.compile(r"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$")
+
+
+def _is_block_rule(r):
+    """Правило блокировки (reject) по набору или по доменам: стоит в начале списка, выше выбора маршрута."""
+    return (isinstance(r, dict) and r.get("action") == "reject" and ("rule_set" in r or "domain_suffix" in r)
+            and set(r) <= {"action", "rule_set", "domain_suffix"})
+
+
+def _is_ads_rule(r):
+    return _is_block_rule(r) and r.get("rule_set") == [BLK_ADS_TAG] and "domain_suffix" not in r
+
+
+def blk_norm(text):
+    """Список сайтов из текста или списка: домен, адрес страницы или «*.домен» → домен. Возвращает (список, ошибки)."""
+    if isinstance(text, str):
+        items = [w for ln in text.splitlines() for w in ln.split("#")[0].replace(",", " ").replace(";", " ").split()]
+    else:
+        items = [str(x) for x in text or []]
+    out, bad = [], []
+    for raw in items:
+        h = raw.strip().lower()
+        if not h or h.startswith("#"):
+            continue
+        if "://" in h:
+            h = urllib.parse.urlsplit(h).hostname or ""
+        h = h.split("/")[0].split("?")[0].split(":")[0].lstrip("*.").strip(".")
+        try:
+            h = h.encode("idna").decode("ascii") if h else h
+        except UnicodeError:
+            bad.append(raw)
+            continue
+        if not _BLK_HOST.match(h):
+            bad.append(raw)
+        elif h not in out:
+            out.append(h)
+    return out, bad
+
+
+def blk_protected(st, hosts):
+    """Домены, которые нельзя блокировать: подписки и источники обновлений (иначе панель потеряет серверы и обновления)."""
+    prot = {"github.com", "githubusercontent.com"}
+    for sub in st.get("subs") or []:
+        h = urllib.parse.urlsplit(str(sub.get("url") or "")).hostname
+        if h:
+            prot.add(h.lower())
+    return [d for d in hosts if any(p == d or p.endswith("." + d) for p in prot)]
+
+
+def blk_view(cfg):
+    ver = parse_ver(sb_version()) or (1, 12, 0)
+    route = cfg.get("route") or {}
+    have = any(isinstance(x, dict) and x.get("tag") == BLK_ADS_TAG for x in route.get("rule_set") or [])
+    rule = any(_is_ads_rule(r) for r in route.get("rules") or [])
+    st = load_state().get("block") or {}
+    applied = st.get("applied") or []
+    sites_on = bool(applied) and any(_is_block_rule(r) and "domain_suffix" in r and set(r["domain_suffix"]) == set(applied) for r in route.get("rules") or [])
+    cf = (cfg.get("experimental") or {}).get("cache_file")
+    return {"supported": ver >= (1, 11, 0), "ads": rule and have, "ads_partial": rule != have,
+            "sites": st.get("sites") or [], "sites_enabled": sites_on, "cache": bool(isinstance(cf, dict) and cf.get("enabled")),
+            "detour": rs_detour(cfg), "max": BLK_MAX}
+
+
+def blk_ads_off(cfg):
+    route = cfg.setdefault("route", {})
+    rules = route.setdefault("rules", [])
+    rules[:] = [r for r in rules if not _is_ads_rule(r)]
+    used = any(f'"{BLK_ADS_TAG}"' in json.dumps(r, ensure_ascii=False) for r in list(rules) + list((cfg.get("dns") or {}).get("rules") or []))
+    if "rule_set" in route and not used:
+        route["rule_set"] = [x for x in route["rule_set"] if not (isinstance(x, dict) and x.get("tag") == BLK_ADS_TAG and x.get("url") == BLK_ADS_URL)]
+        if not route["rule_set"]:
+            del route["rule_set"]
+
+
+def blk_ads_on(cfg, ver):
+    route = cfg.setdefault("route", {})
+    sets = route.setdefault("rule_set", [])
+    if not any(isinstance(x, dict) and x.get("tag") == BLK_ADS_TAG for x in sets):
+        sets.append(rs_entry(BLK_ADS_TAG, cfg, ver, BLK_ADS_URL))
+    rules = route.setdefault("rules", [])
+    if not any(_is_ads_rule(r) for r in rules):
+        rules.insert(_lead_idx(rules), {"rule_set": [BLK_ADS_TAG], "action": "reject"})
+    exp = cfg.setdefault("experimental", {})
+    if not isinstance(exp.get("cache_file"), dict):
+        exp["cache_file"] = {}
+    exp["cache_file"]["enabled"] = True
+
+
+def blk_sites_off(cfg, applied):
+    rules = cfg.setdefault("route", {}).setdefault("rules", [])
+    rules[:] = [r for r in rules if not (_is_block_rule(r) and "domain_suffix" in r and "rule_set" not in r and set(r["domain_suffix"]) == set(applied or []))]
+
+
+@app.get("/api/block")
+def block_get(user: str = Depends(auth)):
+    try:
+        return {"ok": True, **blk_view(_cfg_read())}
+    except (OSError, ValueError) as e:
+        return {"ok": False, "error": f"Не удалось прочитать конфиг: {e}"}
+
+
+@app.post("/api/block")
+def block_set(body: dict, user: str = Depends(auth)):
+    act = body.get("action")
+    if act not in ("ads", "sites"):
+        raise HTTPException(400, "Неизвестное действие")
+    enable = bool(body.get("enable"))
+    with LOCK:
+        try:
+            cfg = _cfg_read()
+            old_text = open(CONFIG, encoding="utf-8").read()
+        except (OSError, ValueError) as e:
+            return {"ok": False, "error": f"Не удалось прочитать конфиг: {e}"}
+        ver = parse_ver(sb_version()) or (1, 12, 0)
+        if enable and ver < (1, 11, 0):
+            return {"ok": False, "error": "Для блокировки нужен sing-box 1.11 или новее (действие reject)"}
+        st = load_state()
+        blk = dict(st.get("block") or {})
+        applied = blk.get("applied") or []
+        sites = None
+        if act == "sites":
+            sites, bad = blk_norm(body["sites"]) if "sites" in body else (blk.get("sites") or [], [])
+            if bad:
+                return {"ok": False, "error": "Не похоже на домен: " + ", ".join(bad[:5]) + (" …" if len(bad) > 5 else "")}
+            if len(sites) > BLK_MAX:
+                return {"ok": False, "error": f"Слишком много сайтов (максимум {BLK_MAX})"}
+            if enable:
+                if not sites:
+                    return {"ok": False, "error": "Список пуст: добавьте хотя бы один домен"}
+                hit = blk_protected(st, sites)
+                if hit:
+                    return {"ok": False, "error": "Нельзя блокировать " + ", ".join(hit) + ": через него панель получает подписки и обновления"}
+            blk_sites_off(cfg, applied)
+            if enable:
+                rules = cfg["route"]["rules"]
+                rules.insert(_lead_idx(rules), {"domain_suffix": sites, "action": "reject"})
+        elif enable:
+            blk_ads_on(cfg, ver)
+        else:
+            blk_ads_off(cfg)
+        t0 = time.time()
+        res = apply_config(json.dumps(cfg), "apply")
+        if not isinstance(res, dict) or not res.get("ok"):
+            return res
+    if act == "ads" and enable and sb_wait_started(t0) != "ok":
+        with LOCK:
+            apply_config(old_text, "apply")
+        return {"ok": False, "error": "sing-box не запустился: не скачался список рекламных доменов (проверьте, что сервер «proxy» работает и GitHub доступен через него). Прежний конфиг возвращён."}
+    with LOCK:
+        st = load_state()
+        blk = dict(st.get("block") or {})
+        if act == "sites":
+            blk["sites"] = sites
+            blk["applied"] = sites if enable else []
+        st["block"] = blk
+        save_state(st)
+    if act == "ads":
+        msg = "Блокировка рекламы включена" if enable else "Блокировка рекламы выключена"
+    else:
+        msg = f"Блокировка сайтов включена: {len(sites)}" if enable else f"Блокировка сайтов выключена, список сохранён ({len(sites)})"
     return {"ok": True, "message": msg}
 
 

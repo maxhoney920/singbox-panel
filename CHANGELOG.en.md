@@ -1,3 +1,9 @@
+## 2.9.0
+- New "Ad and site blocking" card in Routing (everything is enabled only by a button, with confirmation and a config rollback if sing-box fails to start; requires sing-box 1.11+).
+  - Ads: a ready-made SagerNet ad domain list (geosite category-ads-all) and a "block" rule at the top of the rule list. The list is downloaded at start through "proxy" and cached.
+  - Your sites: a list of domains (one per line; page addresses and "*.domain" are accepted); the domain and its subdomains are blocked. The list is kept when disabled. Subscription and update-source domains cannot be blocked.
+  - Blocking works by domain: ads served from the same domain as the content and DNS-over-HTTPS requests are not filtered.
+
 ## 2.8.0
 - The connection status shows the device's external IP and country. It is detected automatically when the panel opens, after a server switch and every 5 minutes while the Status tab is open; no buttons to press (clicking the address re-detects it). The panel queries ipwho.is (fallback: api.ipify.org); the request goes out as ordinary device traffic, i.e. through the VPN when it is on.
 
