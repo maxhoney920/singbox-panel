@@ -1,6 +1,6 @@
 {
   "_doc": "Готовые наборы маршрутизации singbox-panel. После правки увеличьте rev; прежние списки, которые меняете, перенесите в history[id][поле] — так панель узнает и обновит правила, созданные из них.",
-  "rev": 8,
+  "rev": 9,
   "presets": {
     "lan": {
       "t": "Локальные адреса (192.168.x.x, 10.x.x.x…)",
@@ -371,6 +371,19 @@
             "kimi.com",
             "moonshot.ai",
             "moonshot.cn"
+          ]
+        }
+      ]
+    },
+    "tmdb": {
+      "t": "TMDB (themoviedb.org)",
+      "t_en": "TMDB (themoviedb.org)",
+      "d": "proxy",
+      "r": [
+        {
+          "domain_suffix": [
+            "themoviedb.org",
+            "tmdb.org"
           ]
         }
       ]
